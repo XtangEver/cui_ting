@@ -1,0 +1,55 @@
+# LLM模型配置
+models:
+  # 阿里通义千问
+  qwen:
+    api_key: "your-qwen-api-key"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model: "qwen"
+
+  # 智谱GLM
+  glm:
+    api_key: "your-glm-api-key"
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    model: "glm-4"
+
+  # OpenRouter Gemini (推荐，可同时访问多个模型)
+  openrouter_gemini:
+    api_key: "your api key"
+    base_url: "https://openrouter.ai/api/v1"
+    model: "google/gemini-3-flash-preview"
+    extra_headers:
+      HTTP-Referer: "http://localhost"
+      X-Title: "VideoSummarizer"
+    verify_ssl: false
+
+  # 谷歌Gemini (原生API)
+  gemini:
+    api_key: "your-gemini-api-key"
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+    model: "gemini-1.5-flash"
+
+  # DeepSeek
+  deepseek:
+    api_key: "your-deepseek-api-key"
+    base_url: "https://api.deepseek.com/v1"
+    model: "deepseek-chat"
+
+# Whisper模型配置
+whisper:
+  model_path: "/Users/tangxian/work_dir/models/mlx_whisper_medium/"
+
+# 通用设置
+settings:
+  chunk_size: 20480
+  chunk_overlap: 256
+  default_llm_model: "openrouter_gemini"
+  # 可选项：cookie/bili_cookies.txt、cookie/youtube_cookies.txt
+  cookies_file: "cookie/bili_cookies.txt"
+  # 输入json文件路径
+  input_file: "/Users/tangxian/work_dir/cui_ting/input_data.json"
+  # 输出路径
+  output_dir: "/Users/tangxian/Downloads/cc_test"
+  # V2 新增
+  subtitle_first: true
+  extract_frames: true
+  frame_offset: 1.5
