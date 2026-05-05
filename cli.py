@@ -53,7 +53,8 @@ def main():
 
     logger.info("输入任务文件: %s", input_json_path)
     logger.info("输出根目录: %s", output_base_dir)
-    logger.info("默认模型: %s", app_config.default_model)
+    model_names = list(app_config.models.keys())
+    logger.info("可用模型: %s", model_names)
 
     try:
         batch_tasks = load_input_json(input_json_path)
@@ -91,7 +92,6 @@ def main():
 
             result = summarizer.process(
                 url=url,
-                model_name=app_config.default_model,
                 output_dir=project_output_dir
             )
 

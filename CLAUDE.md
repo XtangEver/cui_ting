@@ -1,55 +1,57 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
-## Project Overview
+## 项目概述
 
-cui_ting is a video transcription and summarization tool that downloads audio from Bilibili/YouTube, transcribes using Whisper (MLX for Apple Silicon), and generates structured summaries using LLMs.
+cui_ting 是一个视频转录与智能摘要工具，支持从 Bilibili/YouTube 下载音频，使用 Whisper（MLX，适配 Apple Silicon）进行转录，并通过 LLM 生成结构化文本摘要。
 
-## Commands
+## 命令
 
 ```bash
-# Activate environment and run
+# 激活环境并运行
 conda activate cui_ting && python cli.py
 
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-## Architecture
+## 架构
 
-The project uses a pipeline architecture:
+项目采用流水线架构：
 
 ```
 cli.py → VideoSummarizer.process() → AudioDownloader → Transcriber → LLMProcessor → TextProcessor
 ```
 
-**Core modules:**
-- `cli.py` — Entry point. Reads `input_data.json` and processes batch tasks.
-- `core/summarizer.py` — Main orchestrator. Coordinates the pipeline: download → transcribe → refine. Handles resume logic (checks for existing files).
-- `core/downloader.py` — Audio download using yt-dlp. Handles Bilibili/YouTube cookies, multi-part videos, and FFmpeg merging.
-- `core/transcriber.py` — MLX Whisper transcription with Metal GPU acceleration.
-- `core/llm_processor.py` — LLM API calls for text refinement/denoising.
-- `core/text_processor.py` — Text chunking and result merging.
-- `core/config.py` — Configuration management from config.yaml.
+**核心模块：**
+- `cli.py` — 入口文件。读取 `input_data.json` 并批量处理任务。
+- `core/summarizer.py` — 主编排器。协调流水线：下载 → 转录 → 精炼。处理断点续传逻辑（检查已有文件）。
+- `core/downloader.py` — 使用 yt-dlp 下载音频。处理 Bilibili/YouTube cookies、多分段视频及 FFmpeg 合并。
+- `core/transcriber.py` — MLX Whisper 转录，支持 Metal GPU 加速。
+- `core/llm_processor.py` — LLM API 调用，用于文本精炼/去噪。
+- `core/text_processor.py` — 文本分块与结果合并。
+- `core/config.py` — 配置管理，从 config.yaml 和 .env 加载。
 
-**Configuration:**
-- `config.yaml` — LLM models, Whisper path, chunk settings, I/O paths
-- `input_data.json` — Batch task list (folder name → video URL)
+**配置文件：**
+- `config.yaml` — 模型名称白名单、Whisper 路径、分块设置、输入输出路径
+- `.env` — 模型敏感信息（API Key、Base URL、模型名称）
+- `input_data.json` — 批量任务列表（文件夹名 → 视频URL）
 
-## Key Patterns
+## 关键模式
 
-- **Resume logic**: When rerunning, the tool checks for existing files:
-  - `source*.mp3` → skip download
-  - `*_raw.md` → skip transcription
-  - `*_refined.md` → skip LLM processing
-- **Directory structure**: Output can be flat or nested (`output_dir/video_id/`). The code searches both locations.
-- **Cookie management**: Platform-specific cookies in `cookie/` directory, selected automatically based on URL.
+- **断点续传**：重新运行时，工具会检查已有文件：
+  - `source*.mp3` → 跳过下载
+  - `*_raw.md` → 跳过转录
+  - `*_refined.md` → 跳过 LLM 处理
+- **目录结构**：输出支持扁平或嵌套形式（`output_dir/video_id/`）。代码会同时搜索两种位置。
+- **Cookie 管理**：`cookie/` 目录下按平台存放 cookies，根据 URL 自动选择。
+- **模型配置**：模型通过环境变量统一配置（格式：`{NAME}_API_KEY` / `{NAME}_BASE_URL` / `{NAME}_MODEL`），config.yaml 中仅声明启用的模型名称列表。
 
-## Data Flow
+## 数据流
 
-1. Extract video ID from URL
-2. Download audio to output directory
-3. Transcribe to `source_raw.md`
-4. Split text into chunks, process each with LLM
-5. Merge results to `source_refined.md`
+1. 从 URL 提取视频 ID
+2. 下载音频到输出目录
+3. 转录为 `source_raw.md`
+4. 将文本分块，每块通过 LLM 处理
+5. 合并结果为 `source_refined.md`

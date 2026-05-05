@@ -89,14 +89,14 @@ class LLMProcessor:
         )
         return response.choices[0].message.content
 
-    def refine(self, text: str, model_name: str = "glm") -> str:
+    def refine(self, text: str, model_name: str) -> str:
         logger.info("正在进行文本去噪 (模型: %s)...", model_name)
         prompt = self.PROMPT_REFINE.format(text=text)
         result = self._call_llm(model_name, prompt)
         logger.info("文本去噪完成")
         return result
 
-    def structured_refine(self, text: str, model_name: str = "glm") -> str:
+    def structured_refine(self, text: str, model_name: str) -> str:
         logger.info("正在进行结构化文本整理 (模型: %s)...", model_name)
         prompt = self.STRUCTURED_REFINE_PROMPT.format(text=text)
         result = self._call_llm(model_name, prompt)
