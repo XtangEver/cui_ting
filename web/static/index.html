@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频转录工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>视频转录工具</h1>
+            <p class="subtitle">输入B站链接，自动转录并生成结构化摘要</p>
+        </header>
+
+        <section class="input-section">
+            <form id="task-form">
+                <input type="text" id="url-input" placeholder="请输入B站视频链接..." required>
+                <button type="submit" id="submit-btn">提交</button>
+            </form>
+        </section>
+
+        <section class="task-list-section">
+            <h2>任务列表</h2>
+            <div id="task-list"></div>
+            <p id="empty-hint" class="empty-hint">暂无任务</p>
+        </section>
+
+        <section class="preview-section" id="preview-section" style="display:none;">
+            <div class="preview-header">
+                <h2 id="preview-title">结果预览</h2>
+                <div class="preview-tabs">
+                    <button class="tab-btn active" data-tab="refined">精炼文本</button>
+                    <button class="tab-btn" data-tab="raw">原始转录</button>
+                </div>
+                <button class="close-btn" id="close-preview">关闭</button>
+            </div>
+            <div id="preview-content" class="preview-content markdown-body"></div>
+        </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
