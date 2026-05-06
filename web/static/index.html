@@ -3,41 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>视频转录工具</title>
+    <title>Transcribe - 智能视频转录</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>视频转录工具</h1>
-            <p class="subtitle">输入B站链接，自动转录并生成结构化摘要</p>
-        </header>
+    <!-- Task List Page -->
+    <div id="page-list" class="page">
+        <div class="glow"></div>
+        <div class="container">
+            <header>
+                <h1>Transcribe</h1>
+                <p class="subtitle">将 B 站智慧转化为文字力量</p>
+            </header>
 
-        <section class="input-section">
-            <form id="task-form">
-                <input type="text" id="url-input" placeholder="请输入B站视频链接..." required>
-                <button type="submit" id="submit-btn">提交</button>
-            </form>
-        </section>
-
-        <section class="task-list-section">
-            <h2>任务列表</h2>
-            <div id="task-list"></div>
-            <p id="empty-hint" class="empty-hint">暂无任务</p>
-        </section>
-
-        <section class="preview-section" id="preview-section" style="display:none;">
-            <div class="preview-header">
-                <h2 id="preview-title">结果预览</h2>
-                <div class="preview-tabs">
-                    <button class="tab-btn active" data-tab="refined">精炼文本</button>
-                    <button class="tab-btn" data-tab="raw">原始转录</button>
+            <div class="input-section">
+                <div class="input-wrapper">
+                    <input type="text" id="url-input" placeholder="粘贴视频链接或输入 BV 号...">
                 </div>
-                <button class="close-btn" id="close-preview">关闭</button>
+                <button class="primary-btn" id="submit-btn">开始转录</button>
             </div>
-            <div id="preview-content" class="preview-content markdown-body"></div>
-        </section>
+
+            <div class="task-list-wrapper">
+                <div class="list-header">
+                    <span>近期任务</span>
+                    <span id="task-count">0 任务</span>
+                </div>
+                <div id="task-list"></div>
+            </div>
+        </div>
+        <div id="toast-container"></div>
+    </div>
+
+    <!-- Result Page -->
+    <div id="page-result" class="page" style="display:none;">
+        <div class="glow"></div>
+        <div class="container result-container">
+            <div class="result-header">
+                <button class="back-btn" id="back-btn">&larr; 返回</button>
+                <h2 id="result-title">结果</h2>
+            </div>
+            <div class="result-tabs">
+                <button class="result-tab active" data-tab="refined">精炼文本</button>
+                <button class="result-tab" data-tab="raw">原始转录</button>
+            </div>
+            <div id="result-content" class="result-content markdown-body"></div>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>
