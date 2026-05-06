@@ -1,0 +1,13 @@
+[Unit]
+Description=cui_ting Web App
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/path/to/cui_ting
+ExecStart=/path/to/conda/env/bin/uvicorn web.app:app --host 127.0.0.1 --port 8000
+Restart=always
+Environment=PATH=/path/to/conda/env/bin:/usr/bin
+
+[Install]
+WantedBy=multi-user.target
