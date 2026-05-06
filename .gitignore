@@ -32,6 +32,7 @@ Thumbs.db
 cookie/*
 *.mp3
 .claude
+.superpowers/
 test_case/*
 CLAUDE.md
 prompt.md
