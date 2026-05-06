@@ -6,7 +6,7 @@
 
 ## 特性
 
-- **Web 前端** — 浏览器输入 B站链接，异步处理，在线预览结果，SQLite 持久化存储
+- **Web 前端** — 浏览器输入 B站链接，实时查看流水线进度和处理日志，在线预览 Markdown 结果
 - **多平台支持** — Bilibili、YouTube，自动识别平台并切换 Cookie
 - **字幕优先** — 优先使用平台字幕（更准确），无字幕时 fallback 到 Whisper
 - **全程时间戳** — 转录文本保留时间戳锚点，摘要中每段可溯源到原始视频位置
@@ -100,6 +100,7 @@ uvicorn web.app:app --host 0.0.0.0 --port 8000
 
 - **本机访问**: `http://localhost:8000`
 - **局域网访问**: `http://<你的IP>:8000`（其他设备如手机可用）
+- **域名访问**: 配置 Nginx 反向代理后可通过 `https://www.cuiting.com` 访问（详见生产部署章节）
 
 在页面输入 B站视频链接即可，任务异步执行，完成后在线预览精炼文本。
 
@@ -148,6 +149,50 @@ test_case/
 | GET | `/api/tasks` | 任务列表 |
 | GET | `/api/tasks/{id}` | 任务详情（含文本） |
 | DELETE | `/api/tasks/{id}` | 删除任务 |
+| GET | `/api/tasks/{id}/stream` | SSE 实时事件流（stage_update / log / complete / task_error） |
+
+## 生产部署
+
+### DNS 配置
+
+- A 记录: `www.cuiting.com` → 服务器 IP
+
+### Nginx 反向代理
+
+- 配置文件在 `deploy/nginx.conf`
+- HTTP → HTTPS 重定向
+- SSE 支持: `proxy_buffering off`
+- HTTPS 证书通过 certbot 自动获取
+
+### systemd 服务
+
+- 配置文件在 `deploy/cui_ting.service`
+- 自动重启
+- 开机自启
+
+### 部署步骤
+
+```bash
+# 1. 配置 DNS: www.cuiting.com → 服务器 IP
+
+# 2. 安装 Nginx 和 certbot
+apt install nginx certbot python3-certbot-nginx
+
+# 3. 复制 Nginx 配置
+cp deploy/nginx.conf /etc/nginx/sites-available/cui_ting
+
+# 4. 启用站点
+ln -s /etc/nginx/sites-available/cui_ting /etc/nginx/sites-enabled/
+
+# 5. 获取 HTTPS 证书
+certbot --nginx -d www.cuiting.com
+
+# 6. 配置 systemd（修改 WorkingDirectory 和 ExecStart 路径）
+cp deploy/cui_ting.service /etc/systemd/system/
+
+# 7. 启动服务
+systemctl enable cui_ting && systemctl start cui_ting
+```
 
 ## 配置选项
 
@@ -179,12 +224,15 @@ cui_ting/
 │   ├── text_processor.py       # 文本分块与合并
 │   └── summarizer.py           # 流程编排
 ├── web/
-│   ├── app.py                  # FastAPI 应用，API + 后台 Worker
+│   ├── app.py                  # FastAPI 应用，API + SSE 实时进度 + 后台 Worker
 │   ├── database.py             # SQLite ORM，Task 模型
 │   └── static/
 │       ├── index.html          # 前端页面
 │       ├── style.css           # 样式
 │       └── app.js              # 前端逻辑
+├── deploy/
+│   ├── nginx.conf              # Nginx 反向代理配置
+│   └── cui_ting.service        # systemd 服务配置
 └── data/
     └── cui_ting.db             # SQLite 数据库（自动创建）
 ```
