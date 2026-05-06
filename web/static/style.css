@@ -31,6 +31,7 @@ body {
     line-height: 1.5;
     background-image: radial-gradient(#d1d1d6 0.5px, transparent 0.5px);
     background-size: 24px 24px;
+    -webkit-text-size-adjust: 100%;
 }
 
 .glow {
@@ -92,7 +93,7 @@ input {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: var(--input-bg);
-    font-size: 15px;
+    font-size: 16px;
     transition: var(--transition-base);
     outline: none;
 }
@@ -253,16 +254,25 @@ button.primary-btn:disabled {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 8px;
+    padding: 8px 12px;
     border-radius: 6px;
     transition: var(--transition-base);
     font-size: 13px;
     flex-shrink: 0;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .delete-btn:hover {
     background: #ffe5e5;
     color: var(--red);
+}
+
+.delete-btn:active {
+    background: #ffd5d5;
 }
 
 .exit-animation {
@@ -380,6 +390,7 @@ button.primary-btn:disabled {
     line-height: 1.8;
     max-height: 70vh;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .markdown-body h2 {
@@ -439,10 +450,13 @@ button.primary-btn:disabled {
 }
 
 @media (max-width: 480px) {
-    .container { padding: 24px; }
-    .page { padding: 30px 16px; }
+    .container { padding: 20px 16px; }
+    .page { padding: 20px 8px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
     .input-section { flex-direction: column; }
-    button.primary-btn { padding: 12px; }
-    .task-item { padding: 12px 8px; }
-    .result-container { padding: 24px; }
+    button.primary-btn { padding: 14px; width: 100%; min-height: 48px; }
+    .task-item { padding: 14px 8px; }
+    .result-container { padding: 20px 16px; }
+    #toast-container { bottom: calc(20px + env(safe-area-inset-bottom)); }
+    .back-btn { min-height: 44px; padding: 10px 16px; }
+    .result-tab { min-height: 44px; }
 }
