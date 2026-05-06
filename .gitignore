@@ -36,3 +36,4 @@ test_case/*
 CLAUDE.md
 prompt.md
 input_data.json
+data/
