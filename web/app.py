@@ -1,4 +1,5 @@
-# web/app.py
+import asyncio
+import json
 import logging
 import os
 import queue
@@ -7,7 +8,7 @@ import shutil
 import threading
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -28,24 +29,41 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app = FastAPI(title="cui_ting 视频转录工具")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Init DB on startup
 init_db()
 
-# Load config once
 _config_manager = ConfigManager(os.path.join(BASE_DIR, "config.yaml"))
 _app_config = _config_manager.get_app_config()
 
-# Shared VideoSummarizer (single worker processes one task at a time)
 _summarizer = VideoSummarizer(
     config_path=os.path.join(BASE_DIR, "config.yaml"),
     cookies_file=_app_config.cookies_file,
 )
 
-# Task queue
 _task_queue: queue.Queue = queue.Queue()
+
+# --- SSE infrastructure ---
+
+_event_loop: asyncio.AbstractEventLoop | None = None
+_sse_queues: dict[str, asyncio.Queue] = {}
+
+
+@app.on_event("startup")
+async def _capture_loop():
+    global _event_loop
+    _event_loop = asyncio.get_running_loop()
+
+
+def _emit_sse(task_id: str, event_type: str, data: dict):
+    """Thread-safe SSE event emission from worker thread."""
+    q = _sse_queues.get(task_id)
+    if q and _event_loop:
+        _event_loop.call_soon_threadsafe(
+            q.put_nowait, {"type": event_type, "data": data}
+        )
 
 
 # --- Background worker ---
+
 
 def _worker():
     while True:
@@ -59,7 +77,14 @@ def _worker():
             output_dir = os.path.join(_app_config.output_dir, task_id)
             os.makedirs(output_dir, exist_ok=True)
 
-            result = _summarizer.process(url=task.url, output_dir=output_dir)
+            def progress_callback(event_type, data):
+                _emit_sse(task_id, event_type, data)
+
+            result = _summarizer.process(
+                url=task.url,
+                output_dir=output_dir,
+                progress_callback=progress_callback,
+            )
 
             # Collect results from all parts
             raw_parts = []
@@ -86,11 +111,15 @@ def _worker():
                 title=result.get("video_id", task.title),
             )
 
+            _emit_sse(task_id, "complete", {"task_id": task_id})
+
         except Exception as e:
             logger.exception("Task %s failed", task_id)
             update_task(task_id, status="failed", error_message=str(e))
+            _emit_sse(task_id, "task_error", {"message": str(e)})
         finally:
             _task_queue.task_done()
+            _sse_queues.pop(task_id, None)
 
 
 threading.Thread(target=_worker, daemon=True).start()
@@ -104,8 +133,14 @@ class TaskCreateRequest(BaseModel):
 
 # --- API routes ---
 
+
 @app.get("/")
 def index():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/result/{task_id}")
+def result_page(task_id: str):
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
@@ -114,11 +149,13 @@ def api_create_task(req: TaskCreateRequest):
     if "bilibili.com" not in req.url:
         raise HTTPException(status_code=400, detail="请输入有效的B站链接")
 
-    # Extract BV id
     match = re.search(r"(BV[a-zA-Z0-9]+)", req.url)
     video_id = match.group(1) if match else ""
 
     task = create_task(url=req.url, video_id=video_id)
+
+    # Pre-create SSE queue before enqueuing
+    _sse_queues[task.id] = asyncio.Queue()
     _task_queue.put(task.id)
 
     return _task_to_dict(task, include_content=False)
@@ -128,6 +165,47 @@ def api_create_task(req: TaskCreateRequest):
 def api_list_tasks():
     tasks = list_tasks()
     return [_task_to_dict(t, include_content=False) for t in tasks]
+
+
+@app.get("/api/tasks/{task_id}/stream")
+async def api_stream_task(task_id: str):
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # If task already terminal, send final event immediately
+    if task.status == "completed":
+        async def _done():
+            yield 'event: complete\ndata: {"task_id": "%s"}\n\n' % task_id
+
+        return StreamingResponse(_done(), media_type="text/event-stream")
+
+    if task.status == "failed":
+        msg = (task.error_message or "").replace('"', '\\"')
+        async def _failed():
+            yield 'event: task_error\ndata: {"message": "%s"}\n\n' % msg
+        return StreamingResponse(_failed(), media_type="text/event-stream")
+
+    # Get or create queue for active task
+    q = _sse_queues.get(task_id)
+    if not q:
+        q = asyncio.Queue()
+        _sse_queues[task_id] = q
+
+    async def event_generator():
+        try:
+            while True:
+                event = await asyncio.wait_for(q.get(), timeout=300)
+                data_json = json.dumps(event["data"], ensure_ascii=False)
+                yield f"event: {event['type']}\ndata: {data_json}\n\n"
+                if event["type"] in ("complete", "task_error"):
+                    break
+        except asyncio.TimeoutError:
+            yield 'event: task_error\ndata: {"message": "连接超时"}\n\n'
+        finally:
+            _sse_queues.pop(task_id, None)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/api/tasks/{task_id}")
@@ -144,10 +222,16 @@ def api_delete_task(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    # Clean up output files
     output_dir = os.path.join(_app_config.output_dir, task_id)
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir, ignore_errors=True)
+
+    # Close any open SSE connection
+    q = _sse_queues.pop(task_id, None)
+    if q and _event_loop:
+        _event_loop.call_soon_threadsafe(
+            q.put_nowait, {"type": "task_error", "data": {"message": "任务已删除"}}
+        )
 
     delete_task(task_id)
     return Response(status_code=204)
