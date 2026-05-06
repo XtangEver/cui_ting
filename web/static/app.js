@@ -97,9 +97,12 @@ async function loadTasks() {
     try {
         const res = await fetch('/api/tasks');
         const tasks = await res.json();
+        // Close all SSE before re-rendering (old DOM elements will be destroyed)
+        Object.keys(sseConnections).forEach(closeSSE);
+
         renderTasks(tasks);
 
-        // Open SSE for active tasks
+        // Re-open SSE for active tasks (new DOM elements)
         tasks.forEach(t => {
             if (t.status === 'pending' || t.status === 'processing') {
                 openSSE(t.id);

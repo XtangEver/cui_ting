@@ -176,14 +176,15 @@ async def api_stream_task(task_id: str):
     # If task already terminal, send final event immediately
     if task.status == "completed":
         async def _done():
-            yield 'event: complete\ndata: {"task_id": "%s"}\n\n' % task_id
+            data = json.dumps({"task_id": task_id}, ensure_ascii=False)
+            yield f"event: complete\ndata: {data}\n\n"
 
         return StreamingResponse(_done(), media_type="text/event-stream")
 
     if task.status == "failed":
-        msg = (task.error_message or "").replace('"', '\\"')
         async def _failed():
-            yield 'event: task_error\ndata: {"message": "%s"}\n\n' % msg
+            data = json.dumps({"message": task.error_message or ""}, ensure_ascii=False)
+            yield f"event: task_error\ndata: {data}\n\n"
         return StreamingResponse(_failed(), media_type="text/event-stream")
 
     # Get or create queue for active task
