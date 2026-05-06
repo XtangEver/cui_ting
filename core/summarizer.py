@@ -96,13 +96,16 @@ class VideoSummarizer:
 
     def _refine(self, segments: list[TimestampedSegment],
                 output_dir: str, video_id: str,
-                part_basename: str, model_name: str) -> str:
+                part_basename: str, model_name: str,
+                progress_callback=None) -> str:
         """LLM structured refinement."""
         refined_file = os.path.join(output_dir, f"{part_basename}_refined.md")
 
         found_refined = self._find_file(output_dir, video_id, f"{part_basename}_refined.md")
         if found_refined:
             logger.info("  结构化摘要已存在: %s", found_refined)
+            if progress_callback:
+                progress_callback("log", {"message": "LLM 结果已缓存，跳过"})
             return found_refined
 
         chunks = self.text_processor.split_segments(segments)
@@ -111,6 +114,8 @@ class VideoSummarizer:
         refined_chunks = []
         for i, chunk in enumerate(chunks):
             logger.info("  处理块 %d/%d...", i + 1, len(chunks))
+            if progress_callback:
+                progress_callback("log", {"message": f"LLM 处理: 第 {i + 1}/{len(chunks)} 块"})
             refined_chunks.append(
                 self.llm_processor.structured_refine(chunk, model_name)
             )
@@ -121,24 +126,36 @@ class VideoSummarizer:
             f.write(f"{REFINED_HEADER}{refined_text}")
         logger.info("  结构化摘要已保存: %s", refined_file)
 
+        if progress_callback:
+            progress_callback("log", {"message": "LLM 处理完成"})
+
         return refined_file
 
     # ── Main entry point ──
 
     def _process_part(self, url: str, audio_path: str, idx: int, total: int,
-                      output_dir: str, video_id: str, model_name: str) -> Dict[str, Any]:
-        """Process a single audio segment: transcribe → [optional] refine."""
+                      output_dir: str, video_id: str, model_name: str,
+                      progress_callback=None) -> Dict[str, Any]:
+        """Process a single audio segment: transcribe -> [optional] refine."""
         part_basename = os.path.splitext(os.path.basename(audio_path))[0]
         logger.info("处理分段 [%d/%d]: %s", idx, total, part_basename)
 
+        if progress_callback:
+            progress_callback("log", {"message": f"正在处理第 {idx}/{total} 部分..."})
+
         # Stage 1: Acquire timestamped text
         segments = self._acquire_text(url, audio_path, output_dir, video_id, part_basename)
+
+        if progress_callback:
+            progress_callback("log", {"message": "转录完成"})
+            progress_callback("stage_update", {"stage": "refining", "status": "active"})
 
         # Stage 2: Refine (optional, controlled by enable_refine)
         refined_file = None
         if self.app_config.enable_refine:
             refined_file = self._refine(
-                segments, output_dir, video_id, part_basename, model_name
+                segments, output_dir, video_id, part_basename, model_name,
+                progress_callback=progress_callback,
             )
         else:
             logger.info("  LLM后处理已禁用，跳过精炼步骤")
@@ -150,12 +167,16 @@ class VideoSummarizer:
             'refined_file': refined_file,
         }
 
-    def process(self, url: str, model_name: str = None, output_dir: str = None) -> Dict[str, Any]:
-        """Process video: download → transcribe → refine."""
+    def process(self, url: str, model_name: str = None, output_dir: str = None,
+                progress_callback=None) -> Dict[str, Any]:
+        """Process video: download -> transcribe -> refine."""
         if model_name is None:
             model_name = next(iter(self.app_config.models))
 
         logger.info("开始处理视频: %s (模型: %s)", url, model_name)
+
+        if progress_callback:
+            progress_callback("stage_update", {"stage": "downloading", "status": "active"})
 
         video_id = AudioDownloader.extract_video_id(url)
         if output_dir is None:
@@ -166,18 +187,28 @@ class VideoSummarizer:
         existing_audio = self._find_existing_audio_files(output_dir, video_id)
         if existing_audio:
             logger.info("检测到已存在的音频文件，跳过下载: %s", existing_audio)
+            if progress_callback:
+                progress_callback("log", {"message": "音频已缓存，跳过下载"})
             merged_files = existing_audio
         else:
             _, video_id, merged_files = self.downloader.download_and_merge(url, output_dir=output_dir)
+
+        if progress_callback:
+            progress_callback("log", {"message": "下载完成"})
+            progress_callback("stage_update", {"stage": "transcribing", "status": "active"})
 
         # Process each audio segment
         results = []
         for idx, audio_path in enumerate(merged_files, 1):
             result = self._process_part(
                 url, audio_path, idx, len(merged_files),
-                output_dir, video_id, model_name
+                output_dir, video_id, model_name,
+                progress_callback=progress_callback,
             )
             results.append(result)
+
+        if progress_callback:
+            progress_callback("stage_update", {"stage": "refining", "status": "done"})
 
         logger.info("处理完成! 分段数: %d, 输出目录: %s", len(merged_files), output_dir)
 
