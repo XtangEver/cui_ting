@@ -1,49 +1,76 @@
-// web/static/app.js
-const POLL_INTERVAL = 3000;
-let currentTaskId = null;
-let currentTab = 'refined';
-let taskDataCache = {};
+// State
+const sseConnections = {};
+let currentResultTab = 'refined';
+let taskDataCache = null;
 
-const STATUS_MAP = {
-    pending: { icon: '⏳', label: '等待中', cls: 'status-pending' },
-    processing: { icon: '🔄', label: '处理中', cls: 'status-processing' },
-    completed: { icon: '🟢', label: '已完成', cls: 'status-completed' },
-    failed: { icon: '❌', label: '失败', cls: 'status-failed' },
-};
+// Pipeline stage order (only moves forward)
+const STAGES = ['downloading', 'transcribing', 'refining'];
+const STAGE_LABELS = { downloading: '下载', transcribing: '转录', refining: 'LLM处理' };
 
-// --- DOM refs ---
-const form = document.getElementById('task-form');
-const urlInput = document.getElementById('url-input');
-const submitBtn = document.getElementById('submit-btn');
-const taskList = document.getElementById('task-list');
-const emptyHint = document.getElementById('empty-hint');
-const previewSection = document.getElementById('preview-section');
-const previewTitle = document.getElementById('preview-title');
-const previewContent = document.getElementById('preview-content');
-const closePreview = document.getElementById('close-preview');
+// --- Routing ---
+function initRouter() {
+    const path = window.location.pathname;
+    if (path.startsWith('/result/')) {
+        const taskId = path.split('/result/')[1].replace(/\/$/, '');
+        if (taskId) {
+            showResultPage(taskId);
+            return;
+        }
+    }
+    showListPage();
+}
+
+function showListPage() {
+    document.getElementById('page-list').style.display = '';
+    document.getElementById('page-result').style.display = 'none';
+    document.title = 'Transcribe - 智能视频转录';
+    loadTasks();
+}
+
+function showResultPage(taskId) {
+    document.getElementById('page-list').style.display = 'none';
+    document.getElementById('page-result').style.display = '';
+    loadResult(taskId);
+}
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
-    loadTasks();
-    form.addEventListener('submit', handleSubmit);
+    initRouter();
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    // Submit
+    document.getElementById('submit-btn').addEventListener('click', handleSubmit);
+    document.getElementById('url-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSubmit();
     });
 
-    closePreview.addEventListener('click', () => {
-        previewSection.style.display = 'none';
-        currentTaskId = null;
+    // Back button
+    document.getElementById('back-btn').addEventListener('click', () => {
+        Object.keys(sseConnections).forEach(closeSSE);
+        window.location.href = '/';
+    });
+
+    // Result tabs (event delegation)
+    document.querySelectorAll('.result-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentResultTab = btn.dataset.tab;
+            document.querySelectorAll('.result-tab').forEach(b =>
+                b.classList.toggle('active', b.dataset.tab === currentResultTab));
+            renderResultContent();
+        });
     });
 });
 
 // --- Submit ---
-async function handleSubmit(e) {
-    e.preventDefault();
-    const url = urlInput.value.trim();
-    if (!url) return;
+async function handleSubmit() {
+    const input = document.getElementById('url-input');
+    const btn = document.getElementById('submit-btn');
+    const url = input.value.trim();
+    if (!url) {
+        showToast('请输入有效链接');
+        return;
+    }
 
-    submitBtn.disabled = true;
+    btn.disabled = true;
     try {
         const res = await fetch('/api/tasks', {
             method: 'POST',
@@ -52,102 +79,247 @@ async function handleSubmit(e) {
         });
         if (!res.ok) {
             const err = await res.json();
-            alert(err.detail || '提交失败');
+            showToast(err.detail || '提交失败');
             return;
         }
-        urlInput.value = '';
+        input.value = '';
+        showToast('提交成功，正在处理');
         await loadTasks();
-    } catch (err) {
-        alert('网络错误');
+    } catch {
+        showToast('网络错误');
     } finally {
-        submitBtn.disabled = false;
+        btn.disabled = false;
     }
 }
 
 // --- Task list ---
 async function loadTasks() {
-    const res = await fetch('/api/tasks');
-    const tasks = await res.json();
-    renderTasks(tasks);
-    emptyHint.style.display = tasks.length ? 'none' : 'block';
-    pollActiveTasks(tasks);
+    try {
+        const res = await fetch('/api/tasks');
+        const tasks = await res.json();
+        renderTasks(tasks);
+
+        // Open SSE for active tasks
+        tasks.forEach(t => {
+            if (t.status === 'pending' || t.status === 'processing') {
+                openSSE(t.id);
+            } else {
+                closeSSE(t.id);
+            }
+        });
+    } catch {
+        // ignore
+    }
 }
 
 function renderTasks(tasks) {
-    taskList.innerHTML = tasks.map(t => {
-        const s = STATUS_MAP[t.status] || STATUS_MAP.pending;
-        const time = t.created_at ? new Date(t.created_at).toLocaleString('zh-CN') : '';
+    const list = document.getElementById('task-list');
+    const count = document.getElementById('task-count');
+    count.textContent = `${tasks.length} 任务`;
+
+    if (tasks.length === 0) {
+        list.innerHTML = '<div class="empty-state">暂无任务</div>';
+        return;
+    }
+
+    list.innerHTML = tasks.map(t => {
+        const time = t.created_at ? new Date(t.created_at).toLocaleTimeString('zh-CN', {
+            hour: '2-digit', minute: '2-digit'
+        }) : '';
+        const isClickable = t.status === 'completed';
         const errorHtml = t.status === 'failed' && t.error_message
-            ? `<div class="task-error">${escapeHtml(t.error_message)}</div>` : '';
+            ? `<div class="error-msg">${escapeHtml(t.error_message)}</div>` : '';
+
         return `
-            <div class="task-card" data-id="${t.id}">
-                <span class="task-status ${s.cls}">${s.icon}</span>
+            <div class="task-item ${isClickable ? 'clickable' : ''}" data-id="${t.id}"
+                 ${isClickable ? `onclick="window.location.href='/result/${t.id}'"` : ''}>
                 <div class="task-info">
-                    <div class="task-title">${escapeHtml(t.title || t.video_id)}</div>
-                    <div class="task-meta">${s.label} · ${time}</div>
+                    <span class="task-bv">${escapeHtml(t.video_id || t.url)}</span>
+                    <div class="task-meta">
+                        <span class="status-dot ${t.status}"></span>
+                        <span>${statusLabel(t.status)}</span>
+                        <span>&middot;</span>
+                        <span>${time}</span>
+                    </div>
+                    <div class="pipeline" id="pipeline-${t.id}" style="display:none">
+                        ${STAGES.map(s => `
+                            <div class="pipeline-stage">
+                                <span class="pipeline-dot" data-stage="${s}"></span>
+                                <span>${STAGE_LABELS[s]}</span>
+                            </div>
+                            ${s !== 'refining' ? '<span class="pipeline-arrow">&rarr;</span>' : ''}
+                        `).join('')}
+                    </div>
+                    <div class="log-area" id="logs-${t.id}"></div>
                     ${errorHtml}
                 </div>
-                <div class="task-actions">
-                    ${t.status === 'completed' ? `<button class="btn-view" onclick="viewResult('${t.id}')">查看</button>` : ''}
-                    <button class="btn-delete" onclick="deleteTask('${t.id}')">删除</button>
-                </div>
+                <button class="delete-btn" onclick="event.stopPropagation(); deleteTask('${t.id}', this.closest('.task-item'))">删除</button>
             </div>`;
     }).join('');
 }
 
-function pollActiveTasks(tasks) {
-    const hasActive = tasks.some(t => t.status === 'pending' || t.status === 'processing');
-    if (hasActive) {
-        setTimeout(loadTasks, POLL_INTERVAL);
+function statusLabel(status) {
+    const map = { pending: '等待中', processing: '处理中', completed: '已完成', failed: '失败' };
+    return map[status] || status;
+}
+
+// --- SSE ---
+function openSSE(taskId) {
+    if (sseConnections[taskId]) return;
+
+    const es = new EventSource(`/api/tasks/${taskId}/stream`);
+    sseConnections[taskId] = es;
+
+    es.addEventListener('stage_update', (e) => {
+        const data = JSON.parse(e.data);
+        updatePipeline(taskId, data.stage, data.status);
+    });
+
+    es.addEventListener('log', (e) => {
+        const data = JSON.parse(e.data);
+        appendLog(taskId, data.message);
+    });
+
+    es.addEventListener('complete', () => {
+        closeSSE(taskId);
+        loadTasks();
+    });
+
+    es.addEventListener('task_error', (e) => {
+        const data = JSON.parse(e.data);
+        closeSSE(taskId);
+        loadTasks();
+        if (data.message) showToast(data.message);
+    });
+}
+
+function closeSSE(taskId) {
+    const es = sseConnections[taskId];
+    if (es) {
+        es.close();
+        delete sseConnections[taskId];
     }
 }
 
-// --- View result ---
-async function viewResult(id) {
-    const res = await fetch(`/api/tasks/${id}`);
-    const task = await res.json();
-    currentTaskId = id;
-    currentTab = 'refined';
-    taskDataCache = task;
-    previewTitle.textContent = task.title || task.video_id;
-    updateActiveTab();
-    renderPreview();
-    previewSection.style.display = '';
-    previewSection.scrollIntoView({ behavior: 'smooth' });
+function updatePipeline(taskId, stage, status) {
+    const pipeline = document.getElementById(`pipeline-${taskId}`);
+    if (!pipeline) return;
+    pipeline.style.display = 'flex';
+
+    const stageIdx = STAGES.indexOf(stage);
+    if (stageIdx < 0) return;
+
+    pipeline.querySelectorAll('.pipeline-dot').forEach((dot, i) => {
+        dot.classList.remove('active', 'done', 'failed');
+        if (i < stageIdx) dot.classList.add('done');
+        else if (i === stageIdx) {
+            if (status === 'failed') dot.classList.add('failed');
+            else if (status === 'done') dot.classList.add('done');
+            else dot.classList.add('active');
+        }
+    });
 }
 
-function switchTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    renderPreview();
-}
+function appendLog(taskId, message) {
+    const logs = document.getElementById(`logs-${taskId}`);
+    if (!logs) return;
 
-function updateActiveTab() {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
-}
+    const line = document.createElement('div');
+    line.textContent = message;
+    logs.appendChild(line);
 
-function renderPreview() {
-    const text = currentTab === 'refined' ? taskDataCache.refined_text : taskDataCache.raw_text;
-    if (text) {
-        previewContent.innerHTML = marked.parse(text);
-    } else {
-        previewContent.innerHTML = '<p style="color:#86868b">暂无内容</p>';
+    // Keep last 5 lines
+    while (logs.children.length > 5) {
+        logs.removeChild(logs.firstChild);
     }
+    logs.scrollTop = logs.scrollHeight;
 }
 
 // --- Delete ---
-async function deleteTask(id) {
+async function deleteTask(id, element) {
     if (!confirm('确定删除此任务？')) return;
-    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-    if (currentTaskId === id) {
-        previewSection.style.display = 'none';
-        currentTaskId = null;
+    closeSSE(id);
+
+    if (element) {
+        element.classList.add('exit-animation');
+        await new Promise(r => setTimeout(r, 300));
     }
+
+    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    showToast('任务已移除');
     await loadTasks();
+}
+
+// --- Result page ---
+async function loadResult(taskId) {
+    const title = document.getElementById('result-title');
+    const content = document.getElementById('result-content');
+
+    title.textContent = '加载中...';
+    content.innerHTML = '';
+
+    try {
+        const res = await fetch(`/api/tasks/${taskId}`);
+        if (!res.ok) {
+            title.textContent = '任务不存在';
+            content.innerHTML = '<p class="empty-state">找不到该任务</p>';
+            return;
+        }
+        taskDataCache = await res.json();
+        title.textContent = taskDataCache.video_id || taskDataCache.title || '转录结果';
+
+        // If still processing, poll until done
+        if (taskDataCache.status === 'pending' || taskDataCache.status === 'processing') {
+            const checkDone = setInterval(async () => {
+                const r = await fetch(`/api/tasks/${taskId}`);
+                const t = await r.json();
+                if (t.status === 'completed' || t.status === 'failed') {
+                    clearInterval(checkDone);
+                    taskDataCache = t;
+                    renderResultContent();
+                }
+            }, 3000);
+        }
+
+        renderResultContent();
+    } catch {
+        title.textContent = '加载失败';
+        content.innerHTML = '<p class="empty-state">网络错误</p>';
+    }
+}
+
+function renderResultContent() {
+    if (!taskDataCache) return;
+    const content = document.getElementById('result-content');
+    const text = currentResultTab === 'refined'
+        ? taskDataCache.refined_text
+        : taskDataCache.raw_text;
+
+    if (text) {
+        content.innerHTML = marked.parse(text);
+    } else if (taskDataCache.status === 'failed') {
+        content.innerHTML = `<p class="error-msg">${escapeHtml(taskDataCache.error_message || '处理失败')}</p>`;
+    } else {
+        content.innerHTML = '<p class="empty-state">处理中，请稍候...</p>';
+    }
+}
+
+// --- Toast ---
+function showToast(msg) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 2500);
 }
 
 // --- Utils ---
 function escapeHtml(str) {
+    if (!str) return '';
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
