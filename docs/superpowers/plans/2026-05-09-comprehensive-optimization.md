@@ -36,9 +36,10 @@
 
 - [ ] **Step 1: Add thinking content filter to `_call_llm()`**
 
-In `core/llm_processor.py`, modify `_call_llm()` to strip `<think ...>...</think >` and `<thinking>...</thinking>` blocks using `re.DOTALL`:
+In `core/llm_processor.py`, add `import re` at the top of the file (module level), then modify `_call_llm()` to strip thinking blocks:
 
 ```python
+# At module top (add to existing imports):
 import re
 
 class LLMProcessor:
@@ -609,8 +610,21 @@ def _process_playlist(self, url, output_dir, entries, max_duration, progress_cal
 Update `download_and_merge()` signature to accept and forward `progress_callback`:
 
 ```python
-def download_and_merge(self, url, output_dir=None, max_duration=3600, progress_callback=None):
-    # ... pass progress_callback to download() and _process_playlist()
+def download_and_merge(self, url: str, output_dir: str = None, max_duration: int = 3600,
+                       progress_callback=None) -> Tuple[str, str, List[str]]:
+    video_id = self.extract_video_id(url)
+    if output_dir is None:
+        output_dir = f"output/{video_id}"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # ... existing info extraction code ...
+
+    if 'entries' in info and len(info['entries']) > 1:
+        return self._process_playlist(url, output_dir, info['entries'], max_duration,
+                                      progress_callback=progress_callback)
+    else:
+        path, vid = self.download(url, output_dir, progress_callback=progress_callback)
+        return path, vid, [path]
 ```
 
 - [ ] **Step 2: Commit**
@@ -642,7 +656,21 @@ _, video_id, merged_files = self.downloader.download_and_merge(
 )
 ```
 
-- [ ] **Step 2: Add chunk progress events in `_refine()`**
+- [ ] **Step 2: Add multi-part progress events in `_process_part()`**
+
+In `_process_part()`, add structured progress for multi-part videos (around line 144):
+
+```python
+# After the existing progress_callback("log", {"message": f"正在处理第 {idx}/{total} 部分..."}):
+if progress_callback:
+    progress_callback('progress', {
+        'stage': 'transcribing',
+        'percent': int(idx / total * 100),
+        'detail': f'第 {idx}/{total} 部分'
+    })
+```
+
+- [ ] **Step 3: Add chunk progress events in `_refine()`**
 
 In `_refine()`, add structured progress events alongside existing log events:
 
@@ -856,7 +884,26 @@ def create_task(url: str, video_id: str, tags: str = "", model: str = "") -> Tas
     return task
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Add database migration for existing databases**
+
+`Base.metadata.create_all()` only adds columns to new databases. Existing databases need ALTER TABLE. Add migration logic in `init_db()`:
+
+```python
+from sqlalchemy import text
+
+def init_db():
+    Base.metadata.create_all(engine)
+    # Migrate: add tags and model columns to existing databases
+    with engine.connect() as conn:
+        existing = [row[1] for row in conn.execute(text("PRAGMA table_info(tasks)"))]
+        if 'tags' not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN tags TEXT DEFAULT ''"))
+        if 'model' not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN model VARCHAR DEFAULT ''"))
+        conn.commit()
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add web/database.py
@@ -883,6 +930,7 @@ class TaskCreateRequest(BaseModel):
     url: str
     tags: str = ""
     model: str = ""
+    enable_refine: bool = True
 
 class TaskUpdateRequest(BaseModel):
     title: str | None = None
@@ -974,8 +1022,45 @@ result = _summarizer.process(
     output_dir=output_dir,
     progress_callback=progress_callback,
     model_name=model_name,
+    enable_refine=task.enable_refine if hasattr(task, 'enable_refine') else True,
 )
 ```
+
+Note: `enable_refine` is stored in the task record. We also need to add an `enable_refine` column to the database. In `web/database.py`, add to Task model:
+
+```python
+enable_refine = Column(String, default="true")  # "true"/"false" string
+```
+
+And add migration in `init_db()`:
+
+```python
+if 'enable_refine' not in existing:
+    conn.execute(text("ALTER TABLE tasks ADD COLUMN enable_refine VARCHAR DEFAULT 'true'"))
+```
+
+Update `create_task()` to accept `enable_refine`:
+
+```python
+def create_task(url: str, video_id: str, tags: str = "", model: str = "",
+                enable_refine: str = "true") -> Task:
+    session = get_session()
+    task = Task(url=url, video_id=video_id, title=video_id, status="pending",
+                tags=tags, model=model, enable_refine=enable_refine)
+    ...
+```
+
+In `summarizer.py`, update `process()` signature to accept and use `enable_refine` override:
+
+```python
+def process(self, url: str, model_name: str = None, output_dir: str = None,
+            progress_callback=None, enable_refine: bool = None) -> Dict[str, Any]:
+    # ...
+    # Use override if provided, else fall back to app config
+    should_refine = enable_refine if enable_refine is not None else self.app_config.enable_refine
+```
+
+Then in `_process_part()`, replace `self.app_config.enable_refine` with `should_refine` (passed as parameter).
 
 - [ ] **Step 7: Commit**
 
@@ -1084,6 +1169,13 @@ After the tags input row, add:
             <option value="">默认</option>
         </select>
     </div>
+    <div class="option-row" style="margin-top:8px;">
+        <label for="refine-toggle">启用精炼</label>
+        <label class="toggle-switch">
+            <input type="checkbox" id="refine-toggle" checked>
+            <span class="toggle-slider"></span>
+        </label>
+    </div>
 </div>
 ```
 
@@ -1119,15 +1211,26 @@ function toggleAdvanced() {
 }
 ```
 
-Update `handleSubmit()` to include model:
+Update `handleSubmit()` to include model and enable_refine:
 
 ```javascript
 const model = document.getElementById('model-select').value;
-body: JSON.stringify({ url, tags, model }),
+const enable_refine = document.getElementById('refine-toggle').checked;
+body: JSON.stringify({ url, tags, model, enable_refine }),
 if (model) localStorage.setItem('selected_model', model);
 ```
 
-Call `fetchModels()` inside `showListPage()`.
+Call `fetchModels()` at the end of `showListPage()`:
+
+```javascript
+function showListPage() {
+    document.getElementById('page-list').style.display = '';
+    document.getElementById('page-result').style.display = 'none';
+    document.title = 'Transcribe - 智能视频转录';
+    loadTasks();
+    fetchModels();
+}
+```
 
 - [ ] **Step 3: Add CSS for advanced options**
 
@@ -1170,6 +1273,34 @@ Call `fetchModels()` inside `showListPage()`.
     font-size: 14px;
     outline: none;
 }
+/* Toggle switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--border-color);
+    border-radius: 24px;
+    transition: 0.3s;
+}
+.toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 18px; width: 18px;
+    left: 3px; bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.3s;
+}
+.toggle-switch input:checked + .toggle-slider { background: var(--primary-color); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
 ```
 
 - [ ] **Step 4: Commit**
@@ -1235,8 +1366,8 @@ Verify all interactive elements have min 44x44px in the mobile media query. The 
 
 ```css
 @media (max-width: 480px) {
-    .toolbar-btn { min-height: 40px; padding: 8px 12px; }
-    .rename-btn { min-height: 36px; min-width: 36px; }
+    .toolbar-btn { min-height: 44px; padding: 8px 12px; }
+    .rename-btn { min-height: 44px; min-width: 44px; }
     .tag-chip { padding: 4px 10px; min-height: 28px; }
 }
 ```
