@@ -212,9 +212,11 @@ async function handleSubmit() {
             return;
         }
         input.value = '';
+        input.blur(); // Dismiss keyboard on mobile
         if (tagsInput) tagsInput.value = '';
         if (model) localStorage.setItem('selected_model', model);
         showToast('提交成功，正在处理');
+        navigator.vibrate?.(10);
         await loadTasks();
     } catch (e) {
         if (e.message !== '未登录') showToast('网络错误');
@@ -226,6 +228,8 @@ async function handleSubmit() {
 // --- Task list ---
 async function loadTasks() {
     try {
+        const list = document.getElementById('task-list');
+        list.innerHTML = Array(3).fill('<div class="task-item"><div class="task-info"><div class="skeleton" style="height:16px;width:60%;margin-bottom:8px;"></div><div class="skeleton" style="height:12px;width:40%;"></div></div></div>').join('');
         const res = await authFetch('/api/tasks');
         const tasks = await res.json();
         // Close all SSE before re-rendering (old DOM elements will be destroyed)
@@ -412,6 +416,7 @@ function appendLog(taskId, message) {
 
 // --- Delete ---
 async function deleteTask(id, element) {
+    navigator.vibrate?.(10);
     if (!confirm('确定删除此任务？')) return;
     closeSSE(id);
 

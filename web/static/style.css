@@ -520,6 +520,17 @@ button.primary-btn:disabled {
     font-size: 14px;
 }
 
+.skeleton {
+    background: linear-gradient(90deg, var(--input-bg) 25%, var(--border-color) 50%, var(--input-bg) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+}
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
 .result-container {
     max-width: 720px;
 }
@@ -752,4 +763,6 @@ button.primary-btn:disabled {
     .back-btn { min-height: 44px; padding: 10px 16px; }
     .result-tab { min-height: 44px; }
     .toc-sidebar { display: none !important; }
+    .toolbar-btn { min-height: 44px; padding: 8px 12px; }
+    .tag-chip { padding: 4px 10px; min-height: 28px; }
 }
