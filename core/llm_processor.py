@@ -1,5 +1,6 @@
 # core/llm_processor.py
 import logging
+import re
 
 import httpx
 from openai import OpenAI
@@ -9,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 class LLMProcessor:
     """LLM处理器"""
+
+    _THINK_PATTERN = re.compile(
+        r'<(?:think|thinking)(?:\s[^>]*)?>.*?</(?:think|thinking)\s*>',
+        re.DOTALL
+    )
 
     PROMPT_REFINE = """请对以下文本进行一次性精炼处理，输出一段**干净、连贯、结构清晰的简体中文文本**，要求如下：
 
@@ -27,22 +33,28 @@ class LLMProcessor:
 文本内容：
 {text}"""
 
-    STRUCTURED_REFINE_PROMPT = """请对以下带时间戳的视频转录文本进行结构化整理。要求：
+    STRUCTURED_REFINE_PROMPT = """请对以下原始文本进行一次性精炼处理，输出**干净、连贯、结构清晰的简体中文文本**，要求如下：
 
-1. **保留时间戳锚点**：每个段落开头必须保留原始 [HH:MM:SS] 时间戳。
-2. **去冗余**：删除重复语句、口头禅、无意义语气词。
-3. **保原意**：不得删减事实、观点、数据或逻辑关系；保持原始立场。区分"事实陈述"与"个人观点"，保留说话人的不确定性表述（如"我觉得可能"）。
-4. **结构化**：
-   - 按话题自动分段，每段聚焦一个主题
-   - 为每个主要话题段落添加 Markdown 二级标题（## ）
-   - 自动补全标点
-5. **语言规范**：非简体中文译为简体中文；专业术语保留英文原词。
-6. **仅基于原文**：不添加原文中没有的信息或推断。
+1. **去冗余**：彻底删除重复语句、口头禅（如“呃”“那个”“然后”）、无意义语气词（如“啊”“嗯”“好吧”等），适当梳理表达使语言更精炼。
+2. **保原意**：不得删减任何事实、观点、数据或逻辑关系；保持原始立场和论证顺序。
+3. **强梳理**：
+   - 自动补全标点（句号、逗号、分号等）；
+   - 按语义合理分段（每段聚焦一个主题）；
+   - 若原文逻辑松散，可微调语序使其通顺，但**不得新增内容或改变因果/时序关系**。
+4. **语言规范**：
+   - 所有非简体中文内容一律翻译为简体中文；
+   - **但以下英文关键词保留原词，不翻译**：公认的技术术语、产品名、机构名、品牌名、缩写等，如 Transformer、AI、GPU、FDA、LLM、Chrome 等；
+   - 若遇到无法确定是否保留的英文词，以行业惯例为准，宜保留原词。
+5. **段落观点加粗**：
+   - 每个自然段开头，用**黑体加粗**提炼该段落的核心观点（一句概括）；
+   - 加粗格式统一使用 Markdown 语法 `**核心观点**`；
+   - 观点句之后接详细阐述，形成“**观点** + 展开”的段落结构。
 
-输出格式：带时间戳锚点和章节标题的 Markdown 文本。直接开始正文，不要额外说明。
+> 输出为精炼后的文本，**可合理分段**，每段开头按要求加粗核心观点；**不要标题、不要项目符号列表、不要说明**，直接开始正文。
 
 文本内容：
 {text}"""
+
 
     def __init__(self, config: dict):
         self.model_configs = config
@@ -87,7 +99,9 @@ class LLMProcessor:
             temperature=0.3,
             max_tokens=8192
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        content = self._THINK_PATTERN.sub('', content).strip()
+        return content
 
     def refine(self, text: str, model_name: str) -> str:
         logger.info("正在进行文本去噪 (模型: %s)...", model_name)
