@@ -7,6 +7,89 @@ let taskDataCache = null;
 const STAGES = ['downloading', 'transcribing', 'refining'];
 const STAGE_LABELS = { downloading: '下载', transcribing: '转录', refining: 'LLM处理' };
 
+// Configure marked.js
+marked.setOptions({
+    gfm: true,
+    breaks: false,
+    headerIds: true,
+});
+
+// --- Auth-aware fetch ---
+async function authFetch(url, options = {}) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        showLoginPage();
+        throw new Error('未登录');
+    }
+    return res;
+}
+
+// --- Auth ---
+async function checkAuth() {
+    try {
+        const res = await fetch('/api/auth/check');
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+function showLoginPage() {
+    document.getElementById('page-login').style.display = '';
+    document.getElementById('page-list').style.display = 'none';
+    document.getElementById('page-result').style.display = 'none';
+    document.title = 'Transcribe - 登录';
+}
+
+function showApp() {
+    document.getElementById('page-login').style.display = 'none';
+    document.getElementById('page-list').style.display = '';
+    document.title = 'Transcribe - 智能视频转录';
+    initRouter();
+}
+
+async function handleLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value.trim();
+    const errorEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-btn');
+
+    if (!username || !password) {
+        errorEl.textContent = '请输入账号和密码';
+        errorEl.style.display = '';
+        return;
+    }
+
+    btn.disabled = true;
+    errorEl.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        if (res.ok) {
+            showApp();
+        } else {
+            const err = await res.json();
+            errorEl.textContent = err.detail || '登录失败';
+            errorEl.style.display = '';
+        }
+    } catch {
+        errorEl.textContent = '网络错误';
+        errorEl.style.display = '';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    Object.keys(sseConnections).forEach(closeSSE);
+    showLoginPage();
+}
+
 // --- Routing ---
 function initRouter() {
     const path = window.location.pathname;
@@ -34,8 +117,15 @@ function showResultPage(taskId) {
 }
 
 // --- Init ---
-document.addEventListener('DOMContentLoaded', () => {
-    initRouter();
+document.addEventListener('DOMContentLoaded', async () => {
+    // Login form
+    document.getElementById('login-btn').addEventListener('click', handleLogin);
+    document.getElementById('login-password').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleLogin();
+    });
+
+    // Logout
+    document.getElementById('logout-btn').addEventListener('click', handleLogout);
 
     // Submit
     document.getElementById('submit-btn').addEventListener('click', handleSubmit);
@@ -58,6 +148,13 @@ document.addEventListener('DOMContentLoaded', () => {
             renderResultContent();
         });
     });
+
+    // Check auth and show appropriate page
+    if (await checkAuth()) {
+        showApp();
+    } else {
+        showLoginPage();
+    }
 });
 
 // --- Submit ---
@@ -72,7 +169,7 @@ async function handleSubmit() {
 
     btn.disabled = true;
     try {
-        const res = await fetch('/api/tasks', {
+        const res = await authFetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url }),
@@ -85,8 +182,8 @@ async function handleSubmit() {
         input.value = '';
         showToast('提交成功，正在处理');
         await loadTasks();
-    } catch {
-        showToast('网络错误');
+    } catch (e) {
+        if (e.message !== '未登录') showToast('网络错误');
     } finally {
         btn.disabled = false;
     }
@@ -95,7 +192,7 @@ async function handleSubmit() {
 // --- Task list ---
 async function loadTasks() {
     try {
-        const res = await fetch('/api/tasks');
+        const res = await authFetch('/api/tasks');
         const tasks = await res.json();
         // Close all SSE before re-rendering (old DOM elements will be destroyed)
         Object.keys(sseConnections).forEach(closeSSE);
@@ -132,12 +229,18 @@ function renderTasks(tasks) {
         const isClickable = t.status === 'completed';
         const errorHtml = t.status === 'failed' && t.error_message
             ? `<div class="error-msg">${escapeHtml(t.error_message)}</div>` : '';
+        const displayName = escapeHtml(t.title || t.video_id || t.url);
+        const renameBtn = isClickable
+            ? `<button class="rename-btn" onclick="event.stopPropagation(); startRename('${t.id}')">✎</button>` : '';
 
         return `
             <div class="task-item ${isClickable ? 'clickable' : ''}" data-id="${t.id}"
                  ${isClickable ? `onclick="window.location.href='/result/${t.id}'"` : ''}>
                 <div class="task-info">
-                    <span class="task-bv">${escapeHtml(t.video_id || t.url)}</span>
+                    <div class="task-title-row">
+                        <span class="task-bv" id="title-${t.id}">${displayName}</span>
+                        ${renameBtn}
+                    </div>
                     <div class="task-meta">
                         <span class="status-dot ${t.status}"></span>
                         <span>${statusLabel(t.status)}</span>
@@ -194,6 +297,11 @@ function openSSE(taskId) {
         loadTasks();
         if (data.message) showToast(data.message);
     });
+
+    es.onerror = () => {
+        // EventSource will auto-retry; we only clean up if the task is terminal
+        // (the complete/task_error handlers above handle terminal cleanup)
+    };
 }
 
 function closeSSE(taskId) {
@@ -248,9 +356,101 @@ async function deleteTask(id, element) {
         await new Promise(r => setTimeout(r, 300));
     }
 
-    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    await authFetch(`/api/tasks/${id}`, { method: 'DELETE' });
     showToast('任务已移除');
     await loadTasks();
+}
+
+// --- Rename ---
+function startRename(taskId) {
+    const titleEl = document.getElementById(`title-${taskId}`);
+    if (!titleEl) return;
+    const currentTitle = titleEl.textContent;
+
+    const input = document.createElement('input');
+    input.className = 'rename-input';
+    input.value = currentTitle;
+    input.onclick = (e) => e.stopPropagation();
+
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let saved = false;
+    const save = async () => {
+        if (saved) return;
+        saved = true;
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+            try {
+                await authFetch(`/api/tasks/${taskId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: newTitle }),
+                });
+                showToast('已重命名');
+            } catch { /* ignore */ }
+        }
+        loadTasks();
+    };
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { saved = true; loadTasks(); }
+    });
+}
+
+function startResultRename() {
+    if (!taskDataCache || taskDataCache.status !== 'completed') return;
+    const titleEl = document.getElementById('result-title');
+    const renameBtn = document.getElementById('result-rename-btn');
+    const currentTitle = titleEl.textContent;
+
+    const input = document.createElement('input');
+    input.className = 'rename-input';
+    input.value = taskDataCache.title || currentTitle;
+
+    titleEl.style.display = 'none';
+    renameBtn.style.display = 'none';
+    titleEl.parentNode.insertBefore(input, renameBtn);
+    input.focus();
+    input.select();
+
+    let saved = false;
+    const save = async () => {
+        if (saved) return;
+        saved = true;
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+            try {
+                const res = await authFetch(`/api/tasks/${taskDataCache.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: newTitle }),
+                });
+                if (res.ok) {
+                    taskDataCache.title = newTitle;
+                    showToast('已重命名');
+                }
+            } catch { /* ignore */ }
+        }
+        input.remove();
+        titleEl.textContent = taskDataCache.title || currentTitle;
+        titleEl.style.display = '';
+        renameBtn.style.display = '';
+    };
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') {
+            saved = true;
+            input.remove();
+            titleEl.style.display = '';
+            renameBtn.style.display = '';
+        }
+    });
 }
 
 // --- Result page ---
@@ -262,24 +462,32 @@ async function loadResult(taskId) {
     content.innerHTML = '';
 
     try {
-        const res = await fetch(`/api/tasks/${taskId}`);
+        const res = await authFetch(`/api/tasks/${taskId}`);
         if (!res.ok) {
             title.textContent = '任务不存在';
             content.innerHTML = '<p class="empty-state">找不到该任务</p>';
             return;
         }
         taskDataCache = await res.json();
-        title.textContent = taskDataCache.video_id || taskDataCache.title || '转录结果';
+        title.textContent = taskDataCache.title || taskDataCache.video_id || '转录结果';
+
+        // Show rename button for completed tasks
+        const renameBtn = document.getElementById('result-rename-btn');
+        renameBtn.style.display = taskDataCache.status === 'completed' ? '' : 'none';
 
         // If still processing, poll until done
         if (taskDataCache.status === 'pending' || taskDataCache.status === 'processing') {
             const checkDone = setInterval(async () => {
-                const r = await fetch(`/api/tasks/${taskId}`);
-                const t = await r.json();
-                if (t.status === 'completed' || t.status === 'failed') {
+                try {
+                    const r = await authFetch(`/api/tasks/${taskId}`);
+                    const t = await r.json();
+                    if (t.status === 'completed' || t.status === 'failed') {
+                        clearInterval(checkDone);
+                        taskDataCache = t;
+                        renderResultContent();
+                    }
+                } catch {
                     clearInterval(checkDone);
-                    taskDataCache = t;
-                    renderResultContent();
                 }
             }, 3000);
         }

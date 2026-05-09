@@ -67,6 +67,41 @@ header {
     text-align: center;
 }
 
+.header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.logout-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: var(--transition-base);
+    flex-shrink: 0;
+}
+
+.logout-btn:hover {
+    background: var(--input-bg);
+    color: var(--text-main);
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.login-btn {
+    width: 100%;
+    margin-top: 4px;
+    min-height: 48px;
+}
+
 h1 {
     font-size: 24px;
     font-weight: 600;
@@ -168,6 +203,62 @@ button.primary-btn:disabled {
     font-weight: 500;
     font-size: 15px;
     display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.task-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.task-title-row .task-bv {
+    flex: 1;
+    min-width: 0;
+}
+
+.rename-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 14px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: var(--transition-base);
+    min-height: 28px;
+    min-width: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.task-title-row:hover .rename-btn,
+.result-header:hover .rename-btn,
+.rename-btn:focus {
+    opacity: 1;
+}
+
+.rename-btn:hover {
+    background: var(--input-bg);
+    color: var(--primary-color);
+}
+
+.rename-input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid var(--primary-color);
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    outline: none;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(94, 92, 230, 0.1);
+    min-width: 0;
 }
 
 .task-meta {
@@ -393,6 +484,14 @@ button.primary-btn:disabled {
     -webkit-overflow-scrolling: touch;
 }
 
+/* GitHub-style Markdown */
+.markdown-body h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 28px 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border-color);
+}
 .markdown-body h2 {
     font-size: 18px;
     font-weight: 600;
@@ -400,53 +499,78 @@ button.primary-btn:disabled {
     padding-bottom: 6px;
     border-bottom: 1px solid var(--border-color);
 }
-
 .markdown-body h3 {
     font-size: 16px;
     font-weight: 600;
     margin: 20px 0 6px;
 }
-
-.markdown-body p { margin: 8px 0; }
-
-.markdown-body ul, .markdown-body ol {
-    margin: 8px 0;
-    padding-left: 24px;
+.markdown-body h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 16px 0 4px;
 }
-
+.markdown-body p { margin: 10px 0; line-height: 1.8; }
+.markdown-body ul, .markdown-body ol {
+    margin: 10px 0;
+    padding-left: 28px;
+}
 .markdown-body li { margin: 4px 0; }
-
+.markdown-body li > ul, .markdown-body li > ol { margin: 4px 0; }
 .markdown-body hr {
     border: none;
     border-top: 1px solid var(--border-color);
-    margin: 16px 0;
+    margin: 20px 0;
 }
-
 .markdown-body blockquote {
-    border-left: 3px solid var(--primary-color);
-    padding-left: 16px;
+    border-left: 4px solid var(--primary-color);
+    padding: 8px 16px;
     color: var(--text-muted);
     margin: 12px 0;
-}
-
-.markdown-body code {
     background: var(--input-bg);
+    border-radius: 0 8px 8px 0;
+}
+.markdown-body code {
+    background: rgba(94, 92, 230, 0.08);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 13px;
+    font-family: "SF Mono", Menlo, "Courier New", monospace;
 }
-
 .markdown-body pre {
-    background: var(--input-bg);
+    background: #1d1d1f;
+    color: #e5e5e7;
     padding: 16px;
-    border-radius: 8px;
+    border-radius: 10px;
     overflow-x: auto;
-    margin: 12px 0;
+    margin: 14px 0;
+    border-left: 4px solid var(--primary-color);
 }
-
 .markdown-body pre code {
     background: none;
     padding: 0;
+    color: inherit;
+}
+.markdown-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 14px;
+}
+.markdown-body th, .markdown-body td {
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    text-align: left;
+}
+.markdown-body th {
+    background: var(--input-bg);
+    font-weight: 600;
+}
+.markdown-body tr:nth-child(even) { background: var(--input-bg); }
+.markdown-body strong { font-weight: 600; color: var(--text-main); }
+.markdown-body img {
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 8px 0;
 }
 
 @media (max-width: 480px) {
