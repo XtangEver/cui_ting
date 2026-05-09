@@ -542,6 +542,10 @@ function renderResultContent() {
             if (!h.id) h.id = `heading-${i}`;
         });
         renderTOC(extractHeadings(content));
+        const copyRawBtn = document.getElementById('copy-raw-btn');
+        if (copyRawBtn) {
+            copyRawBtn.style.display = (currentResultTab === 'refined' && taskDataCache.raw_text) ? '' : 'none';
+        }
     } else if (taskDataCache.status === 'failed') {
         content.innerHTML = `<p class="error-msg">${escapeHtml(taskDataCache.error_message || '处理失败')}</p>`;
         renderTOC([]);
@@ -562,6 +566,39 @@ function showToast(msg) {
         toast.style.opacity = '0';
         setTimeout(() => toast.remove(), 300);
     }, 2500);
+}
+
+// --- Export & Copy ---
+function downloadMarkdown() {
+    if (!taskDataCache) return;
+    const text = currentResultTab === 'refined'
+        ? taskDataCache.refined_text
+        : taskDataCache.raw_text;
+    if (!text) return;
+
+    const title = (taskDataCache.title || taskDataCache.video_id || 'transcript').replace(/[^\w一-鿿-]/g, '_');
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('已下载');
+}
+
+function copyCurrentText() {
+    if (!taskDataCache) return;
+    const text = currentResultTab === 'refined'
+        ? taskDataCache.refined_text
+        : taskDataCache.raw_text;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => showToast('已复制'));
+}
+
+function copyRawText() {
+    if (!taskDataCache || !taskDataCache.raw_text) return;
+    navigator.clipboard.writeText(taskDataCache.raw_text).then(() => showToast('已复制原文'));
 }
 
 // --- Utils ---

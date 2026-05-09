@@ -476,6 +476,34 @@ button.primary-btn:disabled {
     color: var(--text-main);
 }
 
+.result-toolbar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--surface-color);
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: var(--transition-base);
+    white-space: nowrap;
+    min-height: 36px;
+}
+.toolbar-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: rgba(94, 92, 230, 0.04);
+}
+
 .result-body {
     display: flex;
     gap: 20px;
