@@ -118,10 +118,12 @@ def _worker():
             def progress_callback(event_type, data):
                 _emit_sse(task_id, event_type, data)
 
+            model_name = task.model if task.model else None
             result = _summarizer.process(
                 url=task.url,
                 output_dir=output_dir,
                 progress_callback=progress_callback,
+                model_name=model_name,
             )
 
             # Collect results from all parts
@@ -168,6 +170,9 @@ threading.Thread(target=_worker, daemon=True).start()
 
 class TaskCreateRequest(BaseModel):
     url: str
+    tags: str = ""
+    model: str = ""
+    enable_refine: bool = True
 
 
 class LoginRequest(BaseModel):
@@ -175,8 +180,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class TaskRenameRequest(BaseModel):
-    title: str
+class TaskUpdateRequest(BaseModel):
+    title: str | None = None
+    tags: str | None = None
+
+    def has_field(self):
+        return self.title is not None or self.tags is not None
 
 
 # --- Auth routes ---
@@ -212,6 +221,20 @@ async def api_logout(request: Request):
     return response
 
 
+# --- API: models ---
+
+
+@app.get("/api/models", dependencies=[Depends(require_auth)])
+def api_list_models():
+    models = []
+    for name, cfg in _app_config.models.items():
+        models.append({
+            "name": name,
+            "display_name": cfg.model.split("/")[-1] if "/" in cfg.model else cfg.model
+        })
+    return models
+
+
 # --- Page routes ---
 
 
@@ -236,7 +259,10 @@ def api_create_task(req: TaskCreateRequest):
     match = re.search(r"(BV[a-zA-Z0-9]+)", req.url)
     video_id = match.group(1) if match else ""
 
-    task = create_task(url=req.url, video_id=video_id)
+    model_name = req.model if req.model else ""
+    enable_refine_str = "true" if req.enable_refine else "false"
+    task = create_task(url=req.url, video_id=video_id, tags=req.tags,
+                       model=model_name, enable_refine=enable_refine_str)
 
     # Pre-create SSE queue before enqueuing
     _sse_queues[task.id] = asyncio.Queue()
@@ -305,15 +331,24 @@ def api_get_task(task_id: str):
 
 
 @app.patch("/api/tasks/{task_id}", dependencies=[Depends(require_auth)])
-def api_rename_task(task_id: str, req: TaskRenameRequest):
+def api_update_task(task_id: str, req: TaskUpdateRequest):
+    if not req.has_field():
+        raise HTTPException(status_code=400, detail="至少提供一个更新字段")
     task = get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    if task.status != "completed":
-        raise HTTPException(status_code=400, detail="只能重命名已完成的任务")
-    if not req.title.strip():
-        raise HTTPException(status_code=400, detail="名称不能为空")
-    updated = update_task(task_id, title=req.title.strip())
+
+    updates = {}
+    if req.title is not None:
+        if task.status != "completed":
+            raise HTTPException(status_code=400, detail="只能重命名已完成的任务")
+        if not req.title.strip():
+            raise HTTPException(status_code=400, detail="名称不能为空")
+        updates["title"] = req.title.strip()
+    if req.tags is not None:
+        updates["tags"] = req.tags
+
+    updated = update_task(task_id, **updates)
     return _task_to_dict(updated, include_content=False)
 
 
@@ -348,6 +383,8 @@ def _task_to_dict(task: Task, include_content: bool = False) -> dict:
         "error_message": task.error_message,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "tags": task.tags,
+        "model": task.model,
         "queue_position": (
             _queue_order.index(task.id) + 1
             if task.status == "pending" and task.id in _queue_order
