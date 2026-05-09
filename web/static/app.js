@@ -6,6 +6,8 @@ let taskDataCache = null;
 // Pipeline stage order (only moves forward)
 const STAGES = ['downloading', 'transcribing', 'refining'];
 const STAGE_LABELS = { downloading: '下载', transcribing: '转录', refining: 'LLM处理' };
+const CHUNK_THRESHOLD = 50000;
+const CHUNK_SIZE = 10000;
 
 // Configure marked.js
 marked.setOptions({
@@ -597,6 +599,56 @@ function scrollToHeading(event, id) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function renderChunked(container, text) {
+    const paragraphs = text.split('\n\n');
+    let rendered = 0;
+
+    function renderNextChunk() {
+        let chunkText = '';
+        while (rendered < paragraphs.length && chunkText.length < CHUNK_SIZE) {
+            chunkText += (chunkText ? '\n\n' : '') + paragraphs[rendered];
+            rendered++;
+        }
+        if (!chunkText) return;
+
+        const html = marked.parse(chunkText);
+        container.insertAdjacentHTML('beforeend', html);
+
+        if (rendered < paragraphs.length) {
+            const loader = document.createElement('div');
+            loader.className = 'chunk-loader';
+            loader.textContent = '加载更多...';
+            container.appendChild(loader);
+
+            const observer = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting) {
+                    observer.disconnect();
+                    loader.remove();
+                    renderNextChunk();
+                }
+            }, { rootMargin: '200px' });
+            observer.observe(loader);
+        }
+    }
+
+    container.innerHTML = '';
+    renderNextChunk();
+    renderTOC([]);
+}
+
+function addHeadingIds(container) {
+    container.querySelectorAll('h2, h3').forEach((h, i) => {
+        if (!h.id) h.id = `heading-${i}`;
+    });
+}
+
+function updateToolbarButtons() {
+    const copyRawBtn = document.getElementById('copy-raw-btn');
+    if (copyRawBtn) {
+        copyRawBtn.style.display = (currentResultTab === 'refined' && taskDataCache.raw_text) ? '' : 'none';
+    }
+}
+
 function renderResultContent() {
     if (!taskDataCache) return;
     const content = document.getElementById('result-content');
@@ -605,16 +657,14 @@ function renderResultContent() {
         : taskDataCache.raw_text;
 
     if (text) {
-        content.innerHTML = marked.parse(text);
-        // Add IDs to headings for TOC linking
-        content.querySelectorAll('h2, h3').forEach((h, i) => {
-            if (!h.id) h.id = `heading-${i}`;
-        });
-        renderTOC(extractHeadings(content));
-        const copyRawBtn = document.getElementById('copy-raw-btn');
-        if (copyRawBtn) {
-            copyRawBtn.style.display = (currentResultTab === 'refined' && taskDataCache.raw_text) ? '' : 'none';
+        if (text.length > CHUNK_THRESHOLD) {
+            renderChunked(content, text);
+        } else {
+            content.innerHTML = marked.parse(text);
+            addHeadingIds(content);
+            renderTOC(extractHeadings(content));
         }
+        updateToolbarButtons();
     } else if (taskDataCache.status === 'failed') {
         content.innerHTML = `<p class="error-msg">${escapeHtml(taskDataCache.error_message || '处理失败')}</p>`;
         renderTOC([]);
