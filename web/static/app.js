@@ -232,6 +232,9 @@ function renderTasks(tasks) {
         const displayName = escapeHtml(t.title || t.video_id || t.url);
         const renameBtn = isClickable
             ? `<button class="rename-btn" onclick="event.stopPropagation(); startRename('${t.id}')">✎</button>` : '';
+        const queueHtml = t.status === 'pending' && t.queue_position
+            ? `<span class="queue-badge">排队中 (第 ${t.queue_position} 位)</span>`
+            : '';
 
         return `
             <div class="task-item ${isClickable ? 'clickable' : ''}" data-id="${t.id}"
@@ -244,6 +247,7 @@ function renderTasks(tasks) {
                     <div class="task-meta">
                         <span class="status-dot ${t.status}"></span>
                         <span>${statusLabel(t.status)}</span>
+                        ${queueHtml}
                         <span>&middot;</span>
                         <span>${time}</span>
                     </div>

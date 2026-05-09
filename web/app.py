@@ -41,6 +41,7 @@ _summarizer = VideoSummarizer(
 )
 
 _task_queue: queue.Queue = queue.Queue()
+_queue_order: list[str] = []
 
 # --- Auth ---
 
@@ -101,6 +102,10 @@ def _clean_prompt_leak(text: str) -> str:
 def _worker():
     while True:
         task_id = _task_queue.get()
+        try:
+            _queue_order.remove(task_id)
+        except ValueError:
+            pass
         try:
             task = get_task(task_id)
             if not task:
@@ -235,6 +240,7 @@ def api_create_task(req: TaskCreateRequest):
 
     # Pre-create SSE queue before enqueuing
     _sse_queues[task.id] = asyncio.Queue()
+    _queue_order.append(task.id)
     _task_queue.put(task.id)
 
     return _task_to_dict(task, include_content=False)
@@ -342,6 +348,11 @@ def _task_to_dict(task: Task, include_content: bool = False) -> dict:
         "error_message": task.error_message,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "queue_position": (
+            _queue_order.index(task.id) + 1
+            if task.status == "pending" and task.id in _queue_order
+            else 0
+        ),
     }
     if include_content:
         d["raw_text"] = task.raw_text

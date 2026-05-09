@@ -332,6 +332,15 @@ button.primary-btn:disabled {
     font-weight: 500;
 }
 
+.queue-badge {
+    background: rgba(94, 92, 230, 0.08);
+    color: var(--primary-color);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
 .log-area {
     margin-top: 8px;
     padding: 8px 12px;
