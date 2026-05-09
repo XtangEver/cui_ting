@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime
 
-from sqlalchemy import create_engine, Column, String, Text, DateTime
+from sqlalchemy import create_engine, Column, String, Text, DateTime, or_, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -26,21 +26,36 @@ class Task(Base):
     raw_text = Column(Text, default="")
     refined_text = Column(Text, default="")
     error_message = Column(Text, default="")
+    tags = Column(Text, default="")  # JSON array string, e.g. '["AI","访谈"]'
+    model = Column(String, default="")  # Selected model name
+    enable_refine = Column(String, default="true")  # "true"/"false" string
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Migrate: add new columns to existing databases
+    with engine.connect() as conn:
+        existing = [row[1] for row in conn.execute(text("PRAGMA table_info(tasks)"))]
+        if 'tags' not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN tags TEXT DEFAULT ''"))
+        if 'model' not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN model VARCHAR DEFAULT ''"))
+        if 'enable_refine' not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN enable_refine VARCHAR DEFAULT 'true'"))
+        conn.commit()
 
 
 def get_session():
     return SessionLocal()
 
 
-def create_task(url: str, video_id: str) -> Task:
+def create_task(url: str, video_id: str, tags: str = "", model: str = "",
+                enable_refine: str = "true") -> Task:
     session = get_session()
-    task = Task(url=url, video_id=video_id, title=video_id, status="pending")
+    task = Task(url=url, video_id=video_id, title=video_id, status="pending",
+                tags=tags, model=model, enable_refine=enable_refine)
     session.add(task)
     session.commit()
     session.refresh(task)
@@ -85,3 +100,14 @@ def delete_task(task_id: str) -> bool:
         return True
     session.close()
     return False
+
+
+def cleanup_stale_tasks() -> int:
+    """Delete all non-terminal tasks (pending/processing) — called on startup."""
+    session = get_session()
+    count = session.query(Task).filter(
+        or_(Task.status == "pending", Task.status == "processing")
+    ).delete(synchronize_session=False)
+    session.commit()
+    session.close()
+    return count
