@@ -111,11 +111,24 @@ class VideoSummarizer:
         chunks = self.text_processor.split_segments(segments)
         logger.info("  文本已分块: %d 块", len(chunks))
 
+        total_chunks = len(chunks)
+        if progress_callback:
+            progress_callback('progress', {
+                'stage': 'refining',
+                'percent': 0,
+                'detail': f'共 {total_chunks} 块'
+            })
+
         refined_chunks = []
         for i, chunk in enumerate(chunks):
             logger.info("  处理块 %d/%d...", i + 1, len(chunks))
             if progress_callback:
                 progress_callback("log", {"message": f"LLM 处理: 第 {i + 1}/{len(chunks)} 块"})
+                progress_callback('progress', {
+                    'stage': 'refining',
+                    'percent': int((i + 1) / total_chunks * 100),
+                    'detail': f'第 {i + 1}/{total_chunks} 块'
+                })
             refined_chunks.append(
                 self.llm_processor.structured_refine(chunk, model_name)
             )
@@ -142,6 +155,11 @@ class VideoSummarizer:
 
         if progress_callback:
             progress_callback("log", {"message": f"正在处理第 {idx}/{total} 部分..."})
+            progress_callback('progress', {
+                'stage': 'transcribing',
+                'percent': int(idx / total * 100),
+                'detail': f'第 {idx}/{total} 部分'
+            })
 
         # Stage 1: Acquire timestamped text
         segments = self._acquire_text(url, audio_path, output_dir, video_id, part_basename)
@@ -191,7 +209,9 @@ class VideoSummarizer:
                 progress_callback("log", {"message": "音频已缓存，跳过下载"})
             merged_files = existing_audio
         else:
-            _, video_id, merged_files = self.downloader.download_and_merge(url, output_dir=output_dir)
+            _, video_id, merged_files = self.downloader.download_and_merge(
+                url, output_dir=output_dir, progress_callback=progress_callback
+            )
 
         if progress_callback:
             progress_callback("log", {"message": "下载完成"})
