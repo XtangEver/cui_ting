@@ -286,6 +286,11 @@ function openSSE(taskId) {
         appendLog(taskId, data.message);
     });
 
+    es.addEventListener('progress', (e) => {
+        const data = JSON.parse(e.data);
+        updateProgress(taskId, data);
+    });
+
     es.addEventListener('complete', () => {
         closeSSE(taskId);
         loadTasks();
@@ -331,6 +336,22 @@ function updatePipeline(taskId, stage, status) {
     });
 }
 
+function updateProgress(taskId, data) {
+    const pipeline = document.getElementById(`pipeline-${taskId}`);
+    if (!pipeline) return;
+
+    let progressEl = pipeline.querySelector('.pipeline-progress');
+    if (!progressEl) {
+        progressEl = document.createElement('div');
+        progressEl.className = 'pipeline-progress';
+        pipeline.parentNode.insertBefore(progressEl, pipeline.nextSibling);
+    }
+    if (data.detail) {
+        progressEl.textContent = data.detail;
+        progressEl.style.display = '';
+    }
+}
+
 function appendLog(taskId, message) {
     const logs = document.getElementById(`logs-${taskId}`);
     if (!logs) return;
@@ -340,7 +361,7 @@ function appendLog(taskId, message) {
     logs.appendChild(line);
 
     // Keep last 5 lines
-    while (logs.children.length > 5) {
+    while (logs.children.length > 8) {
         logs.removeChild(logs.firstChild);
     }
     logs.scrollTop = logs.scrollHeight;

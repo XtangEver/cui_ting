@@ -325,6 +325,13 @@ button.primary-btn:disabled {
     font-size: 10px;
 }
 
+.pipeline-progress {
+    font-size: 11px;
+    color: var(--primary-color);
+    margin-top: 4px;
+    font-weight: 500;
+}
+
 .log-area {
     margin-top: 8px;
     padding: 8px 12px;
