@@ -108,6 +108,7 @@ function showListPage() {
     document.getElementById('page-result').style.display = 'none';
     document.title = 'Transcribe - 智能视频转录';
     loadTasks();
+    fetchModels();
 }
 
 function showResultPage(taskId) {
@@ -158,6 +159,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // --- Submit ---
+async function fetchModels() {
+    try {
+        const res = await authFetch('/api/models');
+        const models = await res.json();
+        const select = document.getElementById('model-select');
+        if (!select || !models.length) return;
+
+        const saved = localStorage.getItem('selected_model');
+        select.innerHTML = '<option value="">默认 (' + escapeHtml(models[0].display_name) + ')</option>' +
+            models.map(m =>
+                `<option value="${escapeHtml(m.name)}" ${m.name === saved ? 'selected' : ''}>${escapeHtml(m.display_name)}</option>`
+            ).join('');
+    } catch { /* ignore */ }
+}
+
+function toggleAdvanced() {
+    const el = document.getElementById('advanced-options');
+    const arrow = document.querySelector('.toggle-arrow');
+    if (el.style.display === 'none') {
+        el.style.display = '';
+        arrow.textContent = '▴';
+    } else {
+        el.style.display = 'none';
+        arrow.textContent = '▾';
+    }
+}
+
 async function handleSubmit() {
     const input = document.getElementById('url-input');
     const btn = document.getElementById('submit-btn');
@@ -170,11 +198,13 @@ async function handleSubmit() {
     }
 
     btn.disabled = true;
+    const model = document.getElementById('model-select')?.value || '';
+    const enable_refine = document.getElementById('refine-toggle')?.checked ?? true;
     try {
         const res = await authFetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, tags }),
+            body: JSON.stringify({ url, tags, model, enable_refine }),
         });
         if (!res.ok) {
             const err = await res.json();
@@ -183,6 +213,7 @@ async function handleSubmit() {
         }
         input.value = '';
         if (tagsInput) tagsInput.value = '';
+        if (model) localStorage.setItem('selected_model', model);
         showToast('提交成功，正在处理');
         await loadTasks();
     } catch (e) {

@@ -51,6 +51,25 @@
                 <div class="tags-input-row" id="tags-input-row">
                     <input type="text" id="tags-input" placeholder="标签（逗号分隔，可选）">
                 </div>
+                <div class="advanced-toggle" id="advanced-toggle" onclick="toggleAdvanced()">
+                    <span>高级选项</span>
+                    <span class="toggle-arrow">▾</span>
+                </div>
+                <div class="advanced-options" id="advanced-options" style="display:none;">
+                    <div class="option-row">
+                        <label for="model-select">模型</label>
+                        <select id="model-select">
+                            <option value="">默认</option>
+                        </select>
+                    </div>
+                    <div class="option-row" style="margin-top:8px;">
+                        <label for="refine-toggle">启用精炼</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="refine-toggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
             </div>
 
             <div class="task-list-wrapper">
