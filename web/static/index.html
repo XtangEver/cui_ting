@@ -5,16 +5,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Transcribe - 智能视频转录</title>
     <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/marked.min.js"></script>
 </head>
 <body>
-    <!-- Task List Page -->
-    <div id="page-list" class="page">
+    <!-- Login Page -->
+    <div id="page-login" class="page" style="display:none;">
         <div class="glow"></div>
         <div class="container">
             <header>
                 <h1>Transcribe</h1>
                 <p class="subtitle">将 B 站智慧转化为文字力量</p>
+            </header>
+            <div class="login-form">
+                <div class="input-wrapper">
+                    <input type="text" id="login-username" placeholder="账号" autocomplete="username">
+                </div>
+                <div class="input-wrapper">
+                    <input type="password" id="login-password" placeholder="密码" autocomplete="current-password">
+                </div>
+                <button class="primary-btn login-btn" id="login-btn">登录</button>
+                <div id="login-error" class="error-msg" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task List Page -->
+    <div id="page-list" class="page" style="display:none;">
+        <div class="glow"></div>
+        <div class="container">
+            <header>
+                <div class="header-row">
+                    <div>
+                        <h1>Transcribe</h1>
+                        <p class="subtitle">将 B 站智慧转化为文字力量</p>
+                    </div>
+                    <button class="logout-btn" id="logout-btn">退出</button>
+                </div>
             </header>
 
             <div class="input-section">
@@ -42,12 +68,16 @@
             <div class="result-header">
                 <button class="back-btn" id="back-btn">&larr; 返回</button>
                 <h2 id="result-title">结果</h2>
+                <button class="rename-btn" id="result-rename-btn" style="display:none;" onclick="startResultRename()">✎</button>
             </div>
             <div class="result-tabs">
                 <button class="result-tab active" data-tab="refined">精炼文本</button>
                 <button class="result-tab" data-tab="raw">原始转录</button>
             </div>
-            <div id="result-content" class="result-content markdown-body"></div>
+            <div class="result-body">
+                <div id="result-content" class="result-content markdown-body"></div>
+                <nav id="toc-sidebar" class="toc-sidebar" style="display:none;"></nav>
+            </div>
         </div>
     </div>
 

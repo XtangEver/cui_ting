@@ -476,13 +476,49 @@ button.primary-btn:disabled {
     color: var(--text-main);
 }
 
+.result-body {
+    display: flex;
+    gap: 20px;
+    position: relative;
+}
 .result-content {
+    flex: 1;
+    min-width: 0;
     font-size: 15px;
     line-height: 1.8;
     max-height: 70vh;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
 }
+.toc-sidebar {
+    width: 180px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 20px;
+    max-height: 70vh;
+    overflow-y: auto;
+    font-size: 13px;
+}
+.toc-title {
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+.toc-link {
+    display: block;
+    padding: 3px 0;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.2s;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.toc-link:hover { color: var(--primary-color); }
+.toc-link.level-3 { padding-left: 12px; }
 
 /* GitHub-style Markdown */
 .markdown-body h1 {
@@ -583,4 +619,5 @@ button.primary-btn:disabled {
     #toast-container { bottom: calc(20px + env(safe-area-inset-bottom)); }
     .back-btn { min-height: 44px; padding: 10px 16px; }
     .result-tab { min-height: 44px; }
+    .toc-sidebar { display: none !important; }
 }

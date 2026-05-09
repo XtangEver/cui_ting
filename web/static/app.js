@@ -499,6 +499,35 @@ async function loadResult(taskId) {
     }
 }
 
+function extractHeadings(container) {
+    const headings = container.querySelectorAll('h2, h3');
+    if (headings.length < 3) return [];
+    return Array.from(headings).map((h, i) => ({
+        level: h.tagName === 'H2' ? 2 : 3,
+        text: h.textContent,
+        id: h.id || `heading-${i}`
+    }));
+}
+
+function renderTOC(headings) {
+    const sidebar = document.getElementById('toc-sidebar');
+    if (!sidebar || headings.length < 3) {
+        if (sidebar) sidebar.style.display = 'none';
+        return;
+    }
+    sidebar.style.display = '';
+    sidebar.innerHTML = '<div class="toc-title">目录</div>' +
+        headings.map(h =>
+            `<a class="toc-link level-${h.level}" href="#${h.id}" onclick="scrollToHeading(event, '${h.id}')">${escapeHtml(h.text)}</a>`
+        ).join('');
+}
+
+function scrollToHeading(event, id) {
+    event.preventDefault();
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function renderResultContent() {
     if (!taskDataCache) return;
     const content = document.getElementById('result-content');
@@ -508,10 +537,17 @@ function renderResultContent() {
 
     if (text) {
         content.innerHTML = marked.parse(text);
+        // Add IDs to headings for TOC linking
+        content.querySelectorAll('h2, h3').forEach((h, i) => {
+            if (!h.id) h.id = `heading-${i}`;
+        });
+        renderTOC(extractHeadings(content));
     } else if (taskDataCache.status === 'failed') {
         content.innerHTML = `<p class="error-msg">${escapeHtml(taskDataCache.error_message || '处理失败')}</p>`;
+        renderTOC([]);
     } else {
         content.innerHTML = '<p class="empty-state">处理中，请稍候...</p>';
+        renderTOC([]);
     }
 }
 
