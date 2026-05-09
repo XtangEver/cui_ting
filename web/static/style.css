@@ -341,6 +341,28 @@ button.primary-btn:disabled {
     font-weight: 500;
 }
 
+.tags-input-row {
+    margin-top: 8px;
+}
+.tags-input-row input {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+.task-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+.tag-chip {
+    background: rgba(94, 92, 230, 0.08);
+    color: var(--primary-color);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
 .log-area {
     margin-top: 8px;
     padding: 8px 12px;

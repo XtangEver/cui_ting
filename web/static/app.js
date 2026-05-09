@@ -162,6 +162,8 @@ async function handleSubmit() {
     const input = document.getElementById('url-input');
     const btn = document.getElementById('submit-btn');
     const url = input.value.trim();
+    const tagsInput = document.getElementById('tags-input');
+    const tags = tagsInput ? tagsInput.value.trim() : '';
     if (!url) {
         showToast('请输入有效链接');
         return;
@@ -172,7 +174,7 @@ async function handleSubmit() {
         const res = await authFetch('/api/tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify({ url, tags }),
         });
         if (!res.ok) {
             const err = await res.json();
@@ -180,6 +182,7 @@ async function handleSubmit() {
             return;
         }
         input.value = '';
+        if (tagsInput) tagsInput.value = '';
         showToast('提交成功，正在处理');
         await loadTasks();
     } catch (e) {
@@ -235,6 +238,10 @@ function renderTasks(tasks) {
         const queueHtml = t.status === 'pending' && t.queue_position
             ? `<span class="queue-badge">排队中 (第 ${t.queue_position} 位)</span>`
             : '';
+        const tags = t.tags ? JSON.parse(t.tags || '[]').filter(Boolean) : [];
+        const tagsHtml = tags.length
+            ? `<div class="task-tags">${tags.map(tag => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('')}</div>`
+            : '';
 
         return `
             <div class="task-item ${isClickable ? 'clickable' : ''}" data-id="${t.id}"
@@ -244,6 +251,7 @@ function renderTasks(tasks) {
                         <span class="task-bv" id="title-${t.id}">${displayName}</span>
                         ${renameBtn}
                     </div>
+                    ${tagsHtml}
                     <div class="task-meta">
                         <span class="status-dot ${t.status}"></span>
                         <span>${statusLabel(t.status)}</span>
