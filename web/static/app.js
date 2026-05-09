@@ -267,6 +267,7 @@ function renderTasks(tasks) {
             hour: '2-digit', minute: '2-digit'
         }) : '';
         const isClickable = t.status === 'completed';
+        const isProcessing = t.status === 'processing';
         const errorHtml = t.status === 'failed' && t.error_message
             ? `<div class="error-msg">${escapeHtml(t.error_message)}</div>` : '';
         const displayName = escapeHtml(t.title || t.video_id || t.url);
@@ -296,14 +297,23 @@ function renderTasks(tasks) {
                         <span>&middot;</span>
                         <span>${time}</span>
                     </div>
-                    <div class="pipeline" id="pipeline-${t.id}" style="display:none">
+                    <div class="pipeline" id="pipeline-${t.id}" style="display:${isProcessing ? 'flex' : 'none'}">
                         ${STAGES.map(s => `
                             <div class="pipeline-stage">
-                                <span class="pipeline-dot" data-stage="${s}"></span>
+                                <span class="pipeline-dot ${isProcessing && s === 'downloading' ? 'active' : ''}" data-stage="${s}"></span>
                                 <span>${STAGE_LABELS[s]}</span>
                             </div>
                             ${s !== 'refining' ? '<span class="pipeline-arrow">&rarr;</span>' : ''}
                         `).join('')}
+                    </div>
+                    <div class="pipeline-progress" id="progress-${t.id}" style="display:${isProcessing ? '' : 'none'}">
+                        <div class="progress-info">
+                            <span class="progress-detail">准备中...</span>
+                            <span class="progress-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-bar-fill" style="width:0%"></div>
+                        </div>
                     </div>
                     <div class="log-area" id="logs-${t.id}"></div>
                     ${errorHtml}
@@ -401,25 +411,25 @@ function updateProgress(taskId, data) {
     }
 
     // Update progress text and bar
-    let progressEl = pipeline.querySelector('.pipeline-progress');
-    if (!progressEl) {
-        progressEl = document.createElement('div');
-        progressEl.className = 'pipeline-progress';
-        pipeline.parentNode.insertBefore(progressEl, pipeline.nextSibling);
-    }
+    const progressEl = document.getElementById(`progress-${taskId}`);
+    if (!progressEl) return;
+    progressEl.style.display = '';
 
     const percent = data.percent || 0;
     const detail = data.detail || '';
-    progressEl.innerHTML = `
-        <div class="progress-info">
-            <span class="progress-detail">${escapeHtml(detail)}</span>
-            <span class="progress-percent">${percent}%</span>
-        </div>
-        <div class="progress-bar">
-            <div class="progress-bar-fill" style="width:${percent}%"></div>
-        </div>
-    `;
-    progressEl.style.display = '';
+    const detailSpan = progressEl.querySelector('.progress-detail');
+    const percentSpan = progressEl.querySelector('.progress-percent');
+    const barFill = progressEl.querySelector('.progress-bar-fill');
+    if (detailSpan) detailSpan.textContent = detail;
+    if (percentSpan) percentSpan.textContent = percent + '%';
+    if (barFill) barFill.style.width = percent + '%';
+
+    // For Whisper transcription stage, start animated indeterminate bar
+    if (data.stage === 'transcribing' && detail.includes('Whisper')) {
+        if (barFill) barFill.classList.add('indeterminate');
+    } else {
+        if (barFill) barFill.classList.remove('indeterminate');
+    }
 }
 
 function appendLog(taskId, message) {

@@ -349,9 +349,9 @@ button.primary-btn:disabled {
     font-size: 11px;
 }
 .progress-bar {
-    height: 4px;
+    height: 6px;
     background: var(--input-bg);
-    border-radius: 2px;
+    border-radius: 3px;
     overflow: hidden;
 }
 .progress-bar-fill {
@@ -359,6 +359,14 @@ button.primary-btn:disabled {
     background: var(--primary-color);
     border-radius: 2px;
     transition: width 0.5s ease;
+}
+.progress-bar-fill.indeterminate {
+    width: 30% !important;
+    animation: indeterminate 1.5s ease-in-out infinite;
+}
+@keyframes indeterminate {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
 }
 
 .queue-badge {
@@ -803,4 +811,8 @@ button.primary-btn:disabled {
     .toolbar-btn { min-height: 44px; padding: 8px 12px; }
     .tag-chip { padding: 4px 10px; min-height: 28px; }
     .rename-btn { opacity: 1; min-height: 44px; min-width: 44px; }
+    .pipeline { font-size: 12px; }
+    .progress-info { font-size: 13px; }
+    .progress-bar { height: 8px; }
+    .pipeline-progress { margin-top: 8px; }
 }
