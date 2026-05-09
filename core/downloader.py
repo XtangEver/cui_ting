@@ -16,6 +16,28 @@ class AudioDownloader:
 
     def __init__(self, cookies_path: str = None):
         self.cookies_path = cookies_path
+        self.progress_callback = None
+
+    def _ydl_progress_hook(self, d):
+        """yt-dlp progress hook — reports download percentage."""
+        if not self.progress_callback:
+            return
+        if d['status'] == 'downloading':
+            total = d.get('_total_bytes') or d.get('_total_bytes_estimate') or 0
+            downloaded = d.get('_downloaded_bytes', 0)
+            if total > 0:
+                percent = int(downloaded / total * 100)
+                self.progress_callback('progress', {
+                    'stage': 'downloading',
+                    'percent': percent,
+                    'detail': f'{percent}%'
+                })
+        elif d['status'] == 'finished':
+            self.progress_callback('progress', {
+                'stage': 'downloading',
+                'percent': 100,
+                'detail': '下载完成'
+            })
 
     @staticmethod
     def _find_tool(name: str) -> str:
@@ -23,7 +45,7 @@ class AudioDownloader:
         path = shutil.which(name)
         return path if path else name
 
-    def download_and_merge(self, url: str, output_dir: str = None, max_duration: int = 3600) -> Tuple[str, str, List[str]]:
+    def download_and_merge(self, url: str, output_dir: str = None, max_duration: int = 3600, progress_callback=None) -> Tuple[str, str, List[str]]:
         """
         主入口：自动识别单视频或播放列表并执行下载合并
         """
@@ -46,17 +68,18 @@ class AudioDownloader:
 
         if 'entries' in info and len(info['entries']) > 1:
             logger.info("检测到分P视频/播放列表，共 %d 个片段", len(info['entries']))
-            return self._process_playlist(url, output_dir, info['entries'], max_duration)
+            return self._process_playlist(url, output_dir, info['entries'], max_duration, progress_callback=progress_callback)
         else:
             logger.info("检测到单个视频")
-            path, vid = self.download(url, output_dir)
+            path, vid = self.download(url, output_dir, progress_callback=progress_callback)
             return path, vid, [path]
 
-    def _process_playlist(self, url: str, output_dir: str, entries: list, max_duration: int) -> Tuple[str, str, List[str]]:
+    def _process_playlist(self, url: str, output_dir: str, entries: list, max_duration: int, progress_callback=None) -> Tuple[str, str, List[str]]:
         """处理分片下载与合并逻辑"""
         video_id = self.extract_video_id(url)
         temp_dir = os.path.join(output_dir, "temp_parts")
         os.makedirs(temp_dir, exist_ok=True)
+        self.progress_callback = progress_callback
         
         downloaded_parts = []
         
@@ -78,7 +101,8 @@ class AudioDownloader:
                 'outtmpl': os.path.join(temp_dir, f"part_{i+1}.%(ext)s"),
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'm4a'}],
                 'cookiefile': self._cookiefile,
-                'quiet': True
+                'quiet': True,
+                'progress_hooks': [self._ydl_progress_hook]
             }
 
             try:
@@ -147,19 +171,21 @@ class AudioDownloader:
             return self.cookies_path
         return None
 
-    def download(self, url: str, output_dir: str = None) -> Tuple[str, str]:
+    def download(self, url: str, output_dir: str = None, progress_callback=None) -> Tuple[str, str]:
         """单视频下载"""
         video_id = self.extract_video_id(url)
         if output_dir is None:
             output_dir = f"output/{video_id}"
         os.makedirs(output_dir, exist_ok=True)
+        self.progress_callback = progress_callback
 
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f"{output_dir}/source.%(ext)s",
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
             'cookiefile': self._cookiefile,
-            'nocheckcertificate': True
+            'nocheckcertificate': True,
+            'progress_hooks': [self._ydl_progress_hook]
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
