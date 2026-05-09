@@ -388,17 +388,38 @@ function updatePipeline(taskId, stage, status) {
 function updateProgress(taskId, data) {
     const pipeline = document.getElementById(`pipeline-${taskId}`);
     if (!pipeline) return;
+    pipeline.style.display = 'flex';
 
+    // Highlight the active stage in the pipeline
+    if (data.stage) {
+        const stageIdx = STAGES.indexOf(data.stage);
+        pipeline.querySelectorAll('.pipeline-dot').forEach((dot, i) => {
+            dot.classList.remove('active', 'done');
+            if (i < stageIdx) dot.classList.add('done');
+            else if (i === stageIdx) dot.classList.add('active');
+        });
+    }
+
+    // Update progress text and bar
     let progressEl = pipeline.querySelector('.pipeline-progress');
     if (!progressEl) {
         progressEl = document.createElement('div');
         progressEl.className = 'pipeline-progress';
         pipeline.parentNode.insertBefore(progressEl, pipeline.nextSibling);
     }
-    if (data.detail) {
-        progressEl.textContent = data.detail;
-        progressEl.style.display = '';
-    }
+
+    const percent = data.percent || 0;
+    const detail = data.detail || '';
+    progressEl.innerHTML = `
+        <div class="progress-info">
+            <span class="progress-detail">${escapeHtml(detail)}</span>
+            <span class="progress-percent">${percent}%</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-bar-fill" style="width:${percent}%"></div>
+        </div>
+    `;
+    progressEl.style.display = '';
 }
 
 function appendLog(taskId, message) {

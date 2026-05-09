@@ -157,15 +157,27 @@ class VideoSummarizer:
             progress_callback("log", {"message": f"正在处理第 {idx}/{total} 部分..."})
             progress_callback('progress', {
                 'stage': 'transcribing',
-                'percent': int(idx / total * 100),
+                'percent': int((idx - 1) / total * 100) if total > 1 else 0,
                 'detail': f'第 {idx}/{total} 部分'
             })
 
         # Stage 1: Acquire timestamped text
+        if progress_callback:
+            progress_callback("log", {"message": "正在使用 Whisper 转录音频，请耐心等待..."})
+            progress_callback('progress', {
+                'stage': 'transcribing',
+                'percent': int((idx - 0.5) / total * 100) if total > 1 else 50,
+                'detail': 'Whisper 转录中...'
+            })
         segments = self._acquire_text(url, audio_path, output_dir, video_id, part_basename)
 
         if progress_callback:
             progress_callback("log", {"message": "转录完成"})
+            progress_callback('progress', {
+                'stage': 'transcribing',
+                'percent': int(idx / total * 100),
+                'detail': f'第 {idx}/{total} 部分转录完成'
+            })
             progress_callback("stage_update", {"stage": "refining", "status": "active"})
 
         # Stage 2: Refine (optional, controlled by enable_refine)

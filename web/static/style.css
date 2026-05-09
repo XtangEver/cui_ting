@@ -116,8 +116,13 @@ h1 {
 
 .input-section {
     display: flex;
-    gap: 12px;
+    flex-direction: column;
+    gap: 0;
     margin-bottom: 32px;
+}
+.input-row {
+    display: flex;
+    gap: 12px;
 }
 
 .input-wrapper { flex: 1; }
@@ -224,14 +229,14 @@ button.primary-btn:disabled {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px 6px;
-    border-radius: 4px;
+    padding: 6px 8px;
+    border-radius: 6px;
     font-size: 14px;
     flex-shrink: 0;
-    opacity: 0;
+    opacity: 0.5;
     transition: var(--transition-base);
-    min-height: 28px;
-    min-width: 28px;
+    min-height: 36px;
+    min-width: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -326,10 +331,34 @@ button.primary-btn:disabled {
 }
 
 .pipeline-progress {
-    font-size: 11px;
+    margin-top: 6px;
+}
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+.progress-detail {
     color: var(--primary-color);
-    margin-top: 4px;
     font-weight: 500;
+}
+.progress-percent {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.progress-bar {
+    height: 4px;
+    background: var(--input-bg);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.progress-bar-fill {
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 2px;
+    transition: width 0.5s ease;
 }
 
 .queue-badge {
@@ -763,7 +792,8 @@ button.primary-btn:disabled {
     .container { padding: 20px 16px; }
     .page { padding: 20px 8px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
     .input-section { flex-direction: column; }
-    button.primary-btn { padding: 14px; width: 100%; min-height: 48px; }
+    .input-row { flex-direction: column; }
+    .input-row button.primary-btn { padding: 14px; width: 100%; min-height: 48px; }
     .task-item { padding: 14px 8px; }
     .result-container { padding: 20px 16px; }
     #toast-container { bottom: calc(20px + env(safe-area-inset-bottom)); }
@@ -772,4 +802,5 @@ button.primary-btn:disabled {
     .toc-sidebar { display: none !important; }
     .toolbar-btn { min-height: 44px; padding: 8px 12px; }
     .tag-chip { padding: 4px 10px; min-height: 28px; }
+    .rename-btn { opacity: 1; min-height: 44px; min-width: 44px; }
 }
