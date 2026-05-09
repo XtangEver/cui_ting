@@ -4,11 +4,12 @@ import logging
 import os
 import queue
 import re
+import secrets
 import shutil
 import threading
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -16,7 +17,7 @@ from core.config import ConfigManager
 from core.summarizer import VideoSummarizer
 from web.database import (
     Task, init_db, create_task, get_task, list_tasks,
-    update_task, delete_task,
+    update_task, delete_task, cleanup_stale_tasks,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,19 @@ _summarizer = VideoSummarizer(
 
 _task_queue: queue.Queue = queue.Queue()
 
+# --- Auth ---
+
+_sessions: set[str] = set()
+AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "tangxian")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "cuiting_0123")
+
+
+async def require_auth(request: Request):
+    token = request.cookies.get("session")
+    if not token or token not in _sessions:
+        raise HTTPException(status_code=401, detail="未登录")
+
+
 # --- SSE infrastructure ---
 
 _event_loop: asyncio.AbstractEventLoop | None = None
@@ -48,9 +62,12 @@ _sse_queues: dict[str, asyncio.Queue] = {}
 
 
 @app.on_event("startup")
-async def _capture_loop():
+async def _on_startup():
     global _event_loop
     _event_loop = asyncio.get_running_loop()
+    cleaned = cleanup_stale_tasks()
+    if cleaned > 0:
+        logger.info("Cleaned up %d stale tasks from previous session", cleaned)
 
 
 def _emit_sse(task_id: str, event_type: str, data: dict):
@@ -63,6 +80,22 @@ def _emit_sse(task_id: str, event_type: str, data: dict):
 
 
 # --- Background worker ---
+
+
+def _clean_prompt_leak(text: str) -> str:
+    """Strip leading prompt fragments that leaked into LLM output."""
+    lines = text.split('\n')
+    cleaned = []
+    skip = True
+    for line in lines:
+        if skip and (line.strip().startswith('请对以下') or
+                     line.strip().startswith('The user wants') or
+                     line.strip().startswith('我需要') or
+                     line.strip().startswith('Let me process')):
+            continue
+        skip = False
+        cleaned.append(line)
+    return '\n'.join(cleaned)
 
 
 def _worker():
@@ -100,6 +133,7 @@ def _worker():
                         refined_parts.append(f.read())
 
             raw_text = "\n\n---\n\n".join(raw_parts)
+            refined_parts = [_clean_prompt_leak(p) for p in refined_parts]
             refined_text = "\n\n---\n\n".join(refined_parts)
 
             update_task(
@@ -131,7 +165,49 @@ class TaskCreateRequest(BaseModel):
     url: str
 
 
-# --- API routes ---
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class TaskRenameRequest(BaseModel):
+    title: str
+
+
+# --- Auth routes ---
+
+
+@app.post("/api/auth/login")
+async def api_login(req: LoginRequest):
+    if req.username == AUTH_USERNAME and req.password == AUTH_PASSWORD:
+        token = secrets.token_hex(32)
+        _sessions.add(token)
+        response = JSONResponse({"ok": True})
+        response.set_cookie("session", token, httponly=True, max_age=86400 * 30,
+                            samesite="lax")
+        return response
+    raise HTTPException(status_code=401, detail="账号或密码错误")
+
+
+@app.get("/api/auth/check")
+async def api_auth_check(request: Request):
+    token = request.cookies.get("session")
+    if token and token in _sessions:
+        return JSONResponse({"authenticated": True})
+    return JSONResponse({"authenticated": False}, status_code=401)
+
+
+@app.post("/api/auth/logout")
+async def api_logout(request: Request):
+    token = request.cookies.get("session")
+    if token:
+        _sessions.discard(token)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie("session")
+    return response
+
+
+# --- Page routes ---
 
 
 @app.get("/")
@@ -144,7 +220,10 @@ def result_page(task_id: str):
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
-@app.post("/api/tasks")
+# --- API routes (protected) ---
+
+
+@app.post("/api/tasks", dependencies=[Depends(require_auth)])
 def api_create_task(req: TaskCreateRequest):
     if "bilibili.com" not in req.url:
         raise HTTPException(status_code=400, detail="请输入有效的B站链接")
@@ -161,13 +240,13 @@ def api_create_task(req: TaskCreateRequest):
     return _task_to_dict(task, include_content=False)
 
 
-@app.get("/api/tasks")
+@app.get("/api/tasks", dependencies=[Depends(require_auth)])
 def api_list_tasks():
     tasks = list_tasks()
     return [_task_to_dict(t, include_content=False) for t in tasks]
 
 
-@app.get("/api/tasks/{task_id}/stream")
+@app.get("/api/tasks/{task_id}/stream", dependencies=[Depends(require_auth)])
 async def api_stream_task(task_id: str):
     task = get_task(task_id)
     if not task:
@@ -196,20 +275,22 @@ async def api_stream_task(task_id: str):
     async def event_generator():
         try:
             while True:
-                event = await asyncio.wait_for(q.get(), timeout=300)
-                data_json = json.dumps(event["data"], ensure_ascii=False)
-                yield f"event: {event['type']}\ndata: {data_json}\n\n"
-                if event["type"] in ("complete", "task_error"):
-                    break
-        except asyncio.TimeoutError:
-            yield 'event: task_error\ndata: {"message": "连接超时"}\n\n'
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30)
+                    data_json = json.dumps(event["data"], ensure_ascii=False)
+                    yield f"event: {event['type']}\ndata: {data_json}\n\n"
+                    if event["type"] in ("complete", "task_error"):
+                        break
+                except asyncio.TimeoutError:
+                    # SSE comment as heartbeat — keeps connection alive through proxies
+                    yield ": heartbeat\n\n"
         finally:
             _sse_queues.pop(task_id, None)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@app.get("/api/tasks/{task_id}")
+@app.get("/api/tasks/{task_id}", dependencies=[Depends(require_auth)])
 def api_get_task(task_id: str):
     task = get_task(task_id)
     if not task:
@@ -217,7 +298,20 @@ def api_get_task(task_id: str):
     return _task_to_dict(task, include_content=True)
 
 
-@app.delete("/api/tasks/{task_id}", status_code=204)
+@app.patch("/api/tasks/{task_id}", dependencies=[Depends(require_auth)])
+def api_rename_task(task_id: str, req: TaskRenameRequest):
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="只能重命名已完成的任务")
+    if not req.title.strip():
+        raise HTTPException(status_code=400, detail="名称不能为空")
+    updated = update_task(task_id, title=req.title.strip())
+    return _task_to_dict(updated, include_content=False)
+
+
+@app.delete("/api/tasks/{task_id}", status_code=204, dependencies=[Depends(require_auth)])
 def api_delete_task(task_id: str):
     task = get_task(task_id)
     if not task:

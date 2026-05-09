@@ -16,6 +16,13 @@ class LLMProcessor:
         re.DOTALL
     )
 
+    _PROMPT_ECHO_PATTERNS = [
+        "请对以下文本进行",
+        "The user wants me to",
+        "我需要对以下",
+        "Let me process",
+    ]
+
     PROMPT_REFINE = """请对以下文本进行一次性精炼处理，输出一段**干净、连贯、结构清晰的简体中文文本**，要求如下：
 
 1. **去冗余**：彻底删除重复语句、口头禅（如"呃""那个""然后"）、无意义语气词（如"啊""嗯""好吧"等）。
@@ -101,6 +108,14 @@ class LLMProcessor:
         )
         content = response.choices[0].message.content
         content = self._THINK_PATTERN.sub('', content).strip()
+
+        # Best-effort prompt echo detection (log only, don't block)
+        first_line = content.split('\n', 1)[0][:100]
+        for pattern in self._PROMPT_ECHO_PATTERNS:
+            if pattern in first_line:
+                logger.warning("Possible prompt echo detected in LLM response (model: %s)", model_name)
+                break
+
         return content
 
     def refine(self, text: str, model_name: str) -> str:
