@@ -9,6 +9,8 @@ build/
 
 # 环境与密钥
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 env/
@@ -29,11 +31,30 @@ logs/
 Thumbs.db
 
 # 项目特定
-cookie/*
+cookie/*.txt
+cookie/**/*.txt
 *.mp3
+*.wav
+*.m4a
+*.webm
+*.part
+*.vtt
+*.srt
 .claude
 .superpowers/
-test_case/*
+.worktrees/
+test_case/
+.transcription_cache/
+**/.transcription_cache/
+**/.download_manifest.json
+.e2e/
+output/
+models/
+.cache/
+*.pem
+*.key
+*.p12
+*.pfx
 CLAUDE.md
 prompt.md
 input_data.json

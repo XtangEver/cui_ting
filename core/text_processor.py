@@ -6,6 +6,10 @@ class TextProcessor:
     SENTENCE_ENDINGS = '.?!。？！'
 
     def __init__(self, chunk_size: int = 5120, chunk_overlap: int = 256):
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero")
+        if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+            raise ValueError("chunk_overlap must be non-negative and less than chunk_size")
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 

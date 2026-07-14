@@ -1,4 +1,8 @@
 from dataclasses import dataclass
+import re
+
+
+_ANCHORED_LINE = re.compile(r"^\[(\d+:[0-5]\d:[0-5]\d)\]\s*(.+)$")
 
 
 @dataclass
@@ -39,14 +43,12 @@ def segments_to_anchored_text(segments: list[TimestampedSegment]) -> str:
 
 
 def parse_anchored_text(text: str) -> list[TimestampedSegment]:
-    import re
-    pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*(.+)$")
     segments = []
     for line in text.strip().split("\n"):
         line = line.strip()
         if not line:
             continue
-        match = pattern.match(line)
+        match = _ANCHORED_LINE.fullmatch(line)
         if match:
             start = parse_timestamp(match.group(1))
             segments.append(TimestampedSegment(start=start, end=start, text=match.group(2)))

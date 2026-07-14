@@ -1433,7 +1433,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/www.cuiting.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://example.com:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -1442,7 +1442,7 @@ server {
 
     # SSE stream endpoints
     location ~ ^/api/tasks/[^/]+/stream$ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://example.com:8000;
         proxy_buffering off;
         proxy_cache off;
         proxy_set_header Connection '';

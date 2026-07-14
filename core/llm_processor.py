@@ -7,6 +7,8 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
+_MAX_LLM_RETRIES = 5
+
 
 class LLMProcessor:
     """LLM处理器"""
@@ -18,53 +20,37 @@ class LLMProcessor:
 
     _PROMPT_ECHO_PATTERNS = [
         "请对以下文本进行",
+        "请对以下原始文本进行",
         "The user wants me to",
         "我需要对以下",
         "Let me process",
     ]
 
-    PROMPT_REFINE = """请对以下文本进行一次性精炼处理，输出一段**干净、连贯、结构清晰的简体中文文本**，要求如下：
+    STRUCTURED_REFINE_PROMPT = """以下文本由 Whisper 根据演讲者语音转录生成。请在最大限度保留原文内容、观点、事实、数据、逻辑关系和表达顺序的前提下，对文本进行清洗和结构化整理。
 
-1. **去冗余**：彻底删除重复语句、口头禅（如"呃""那个""然后"）、无意义语气词（如"啊""嗯""好吧"等）。
-2. **保原意**：不得删减任何事实、观点、数据或逻辑关系；保持原始立场和论证顺序。
-3. **强梳理**：
-   - 自动补全标点（句号、逗号、分号等）；
-   - 按语义合理分段（每段聚焦一个主题）；
-   - 若原文逻辑松散，可微调语序使其通顺，但**不得新增内容或改变因果/时序关系**。
-4. **语言规范**：
-   - 非简体中文内容须准确译为简体中文；
-   - **专业术语、技术名词、产品名、机构名等保留英文原词**（如 Transformer、GPU、FDA、LLM）。
+要求：
+1. 删除无实际语义的口头禅、语气词、重复词句和自我修正残留，例如“呃”“嗯”“那个”“然后”“就是说”等。
+2. 对语义重复的内容进行合并，但必须保留其中独有的信息；具有强调、递进、对比或论证作用的重复不得删除。
+3. 修正明显的断句、标点、语序和语病，使文本连贯、规范，但不得新增信息、改变原意或将原文压缩为摘要。
+4. 非简体中文内容翻译为简体中文；专业术语、技术名词、产品名、模型名、机构名和缩写保留常用英文原词，例如 Transformer、GPU、FDA、LLM。
+5. 对疑似 Whisper 识别错误的内容，仅在能够根据上下文明确判断时修正；无法确定时保留原文，不得猜测。
+6. 根据主题将全文拆分为若干子部分，并为每个子部分添加简洁标题，保持原文整体论述顺序。
+7. 每个子部分末尾添加以“结论：”开头的结论段落。结论只能归纳该部分原文已经表达的内容，不得引入新观点、新事实或额外推论。若原文未形成明确结论，应如实说明。
+8. 除标题、整理后的正文和结论外，不要输出任何说明。
 
-> 输出仅为一段整理后的文本，**不要标题、不要说明、不要分块、不要列表**，直接开始正文。
-
-文本内容：
-{text}"""
-
-    STRUCTURED_REFINE_PROMPT = """请对以下原始文本进行一次性精炼处理，输出**干净、连贯、结构清晰的简体中文文本**，要求如下：
-
-1. **去冗余**：彻底删除重复语句、口头禅（如“呃”“那个”“然后”）、无意义语气词（如“啊”“嗯”“好吧”等），适当梳理表达使语言更精炼。
-2. **保原意**：不得删减任何事实、观点、数据或逻辑关系；保持原始立场和论证顺序。
-3. **强梳理**：
-   - 自动补全标点（句号、逗号、分号等）；
-   - 按语义合理分段（每段聚焦一个主题）；
-   - 若原文逻辑松散，可微调语序使其通顺，但**不得新增内容或改变因果/时序关系**。
-4. **语言规范**：
-   - 所有非简体中文内容一律翻译为简体中文；
-   - **但以下英文关键词保留原词，不翻译**：公认的技术术语、产品名、机构名、品牌名、缩写等，如 Transformer、AI、GPU、FDA、LLM、Chrome 等；
-   - 若遇到无法确定是否保留的英文词，以行业惯例为准，宜保留原词。
-5. **段落观点加粗**：
-   - 每个自然段开头，用**黑体加粗**提炼该段落的核心观点（一句概括）；
-   - 加粗格式统一使用 Markdown 语法 `**核心观点**`；
-   - 观点句之后接详细阐述，形成“**观点** + 展开”的段落结构。
-
-> 输出为精炼后的文本，**可合理分段**，每段开头按要求加粗核心观点；**不要标题、不要项目符号列表、不要说明**，直接开始正文。
-
-文本内容：
+待处理文本：
 {text}"""
 
 
-    def __init__(self, config: dict):
+    def __init__(
+        self,
+        config: dict,
+        max_tokens: int = 128000,
+        client_factory=None,
+    ):
         self.model_configs = config
+        self.max_tokens = max_tokens
+        self.client_factory = client_factory or OpenAI
         self._clients: dict[str, OpenAI] = {}
 
     def _get_client(self, model_name: str) -> OpenAI:
@@ -79,15 +65,17 @@ class LLMProcessor:
                     verify=model_cfg.verify_ssl,
                     headers=custom_headers
                 )
-                self._clients[model_name] = OpenAI(
+                self._clients[model_name] = self.client_factory(
                     api_key=model_cfg.api_key,
                     base_url=model_cfg.base_url,
-                    http_client=http_client
+                    http_client=http_client,
+                    max_retries=_MAX_LLM_RETRIES,
                 )
             else:
-                self._clients[model_name] = OpenAI(
+                self._clients[model_name] = self.client_factory(
                     api_key=model_cfg.api_key,
-                    base_url=model_cfg.base_url
+                    base_url=model_cfg.base_url,
+                    max_retries=_MAX_LLM_RETRIES,
                 )
         return self._clients[model_name]
 
@@ -104,7 +92,7 @@ class LLMProcessor:
             model=model_cfg.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=8192
+            max_tokens=self.max_tokens
         )
         content = response.choices[0].message.content
         content = self._THINK_PATTERN.sub('', content).strip()
@@ -120,7 +108,7 @@ class LLMProcessor:
 
     def refine(self, text: str, model_name: str) -> str:
         logger.info("正在进行文本去噪 (模型: %s)...", model_name)
-        prompt = self.PROMPT_REFINE.format(text=text)
+        prompt = self.STRUCTURED_REFINE_PROMPT.format(text=text)
         result = self._call_llm(model_name, prompt)
         logger.info("文本去噪完成")
         return result

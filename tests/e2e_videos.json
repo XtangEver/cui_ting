@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Natural Language Processing In 5 Minutes",
+    "platform": "youtube",
+    "url": "https://www.youtube.com/watch?v=CMrHM8a3hqw",
+    "duration_seconds": 329,
+    "bucket": "5m"
+  },
+  {
+    "name": "2024 Generative AI Introduction - What Is Generative AI?",
+    "platform": "bilibili",
+    "url": "https://www.bilibili.com/video/BV1vj421o7Ui/?p=2",
+    "duration_seconds": 1768.988,
+    "bucket": "30m"
+  },
+  {
+    "name": "Intro to Large Language Models",
+    "platform": "youtube",
+    "url": "https://www.youtube.com/watch?v=zjkBMFhNj_g",
+    "duration_seconds": 3588,
+    "bucket": "1h"
+  },
+  {
+    "name": "2025 AI Agent Tutorial - Principles and Examples",
+    "platform": "bilibili",
+    "url": "https://www.bilibili.com/video/BV1XtdHYbEiW/?p=1",
+    "duration_seconds": 6119.294,
+    "bucket": "2h"
+  }
+]

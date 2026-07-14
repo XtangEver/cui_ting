@@ -1,14 +1,113 @@
 # core/downloader.py
 import logging
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Tuple, List
 
 import yt_dlp
 
 logger = logging.getLogger(__name__)
+
+DOWNLOAD_MANIFEST_NAME = ".download_manifest.json"
+DOWNLOAD_MANIFEST_SCHEMA = 1
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def publish_download_manifest(
+    output_dir: str | os.PathLike[str], url: str, outputs: list[str]
+) -> None:
+    """Atomically mark a download complete after every output is valid."""
+    root = Path(output_dir).resolve()
+    records = []
+    if not outputs:
+        raise RuntimeError("下载完成清单不能包含空输出列表")
+    for output in outputs:
+        path = Path(output).resolve()
+        try:
+            relative_path = path.relative_to(root)
+        except ValueError as exc:
+            raise RuntimeError(f"下载输出不在任务目录内: {path}") from exc
+        if not path.is_file() or path.stat().st_size == 0:
+            raise RuntimeError(f"下载输出无效: {path}")
+        records.append(
+            {
+                "path": relative_path.as_posix(),
+                "size": path.stat().st_size,
+                "sha256": _sha256(path),
+            }
+        )
+
+    manifest = root / DOWNLOAD_MANIFEST_NAME
+    temp = manifest.with_name(manifest.name + ".tmp")
+    payload = {
+        "schema_version": DOWNLOAD_MANIFEST_SCHEMA,
+        "source_url": url,
+        "outputs": records,
+    }
+    try:
+        with temp.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, manifest)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def load_completed_download(
+    output_dir: str | os.PathLike[str], url: str
+) -> list[str]:
+    """Return the complete verified output set, never partial glob matches."""
+    root = Path(output_dir).resolve()
+    manifest = root / DOWNLOAD_MANIFEST_NAME
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        if (
+            payload.get("schema_version") != DOWNLOAD_MANIFEST_SCHEMA
+            or payload.get("source_url") != url
+            or not isinstance(payload.get("outputs"), list)
+            or not payload["outputs"]
+        ):
+            return []
+        completed = []
+        for record in payload["outputs"]:
+            if not isinstance(record, dict):
+                return []
+            relative = record.get("path")
+            if not isinstance(relative, str) or not relative:
+                return []
+            path = (root / relative).resolve()
+            path.relative_to(root)
+            if (
+                not path.is_file()
+                or path.stat().st_size == 0
+                or path.stat().st_size != record.get("size")
+                or _sha256(path) != record.get("sha256")
+            ):
+                return []
+            completed.append(str(path))
+        return completed
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, ValueError):
+        return []
+
+
+def _invalidate_download_manifest(output_dir: str | os.PathLike[str]) -> None:
+    root = Path(output_dir)
+    (root / DOWNLOAD_MANIFEST_NAME).unlink(missing_ok=True)
+    (root / f"{DOWNLOAD_MANIFEST_NAME}.tmp").unlink(missing_ok=True)
 
 
 class AudioDownloader:
@@ -53,6 +152,7 @@ class AudioDownloader:
         if output_dir is None:
             output_dir = f"output/{video_id}"
         os.makedirs(output_dir, exist_ok=True)
+        _invalidate_download_manifest(output_dir)
 
         # 获取元数据，检查是否为多条目（播放列表/分P）
         ydl_opts_info = {
@@ -72,6 +172,7 @@ class AudioDownloader:
         else:
             logger.info("检测到单个视频")
             path, vid = self.download(url, output_dir, progress_callback=progress_callback)
+            publish_download_manifest(output_dir, url, [path])
             return path, vid, [path]
 
     def _process_playlist(self, url: str, output_dir: str, entries: list, max_duration: int, progress_callback=None) -> Tuple[str, str, List[str]]:
@@ -79,20 +180,24 @@ class AudioDownloader:
         video_id = self.extract_video_id(url)
         temp_dir = os.path.join(output_dir, "temp_parts")
         os.makedirs(temp_dir, exist_ok=True)
+        _invalidate_download_manifest(output_dir)
         self.progress_callback = progress_callback
         
         downloaded_parts = []
         
         for i, entry in enumerate(entries):
-            if not entry: continue
+            if not entry:
+                raise RuntimeError(f"分片 {i + 1} 元数据无效，终止整个任务")
             part_url = entry.get('url') or url # 兼容 Bilibili 内部跳转
             part_path = os.path.join(temp_dir, f"part_{i+1}.m4a")
             
             # 断点续传检查
             if os.path.exists(part_path):
                 duration = self._get_duration(part_path)
-                downloaded_parts.append((part_path, duration))
-                continue
+                if duration > 0 and os.path.getsize(part_path) > 0:
+                    downloaded_parts.append((part_path, duration))
+                    continue
+                os.remove(part_path)
 
             logger.info("下载分片 %d/%d: %s", i + 1, len(entries), entry.get('title', 'Unknown'))
             
@@ -108,14 +213,20 @@ class AudioDownloader:
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([part_url])
-                if os.path.exists(part_path):
-                    duration = self._get_duration(part_path)
-                    downloaded_parts.append((part_path, duration))
+                if not os.path.isfile(part_path) or os.path.getsize(part_path) == 0:
+                    raise RuntimeError("下载命令未生成有效音频文件")
+                duration = self._get_duration(part_path)
+                if duration <= 0:
+                    raise RuntimeError("下载音频时长无效")
+                downloaded_parts.append((part_path, duration))
             except Exception as e:
-                logger.warning("分片 %d 下载跳过: %s", i + 1, e)
+                raise RuntimeError(f"分片 {i + 1} 下载失败，终止整个任务: {e}") from e
 
         merged_files = self._merge_audio_files(downloaded_parts, output_dir, temp_dir, max_duration)
-        return merged_files[0] if merged_files else "", video_id, merged_files
+        if not merged_files:
+            raise RuntimeError("播放列表未生成任何合并音频，终止整个任务")
+        publish_download_manifest(output_dir, url, merged_files)
+        return merged_files[0], video_id, merged_files
 
     def _get_duration(self, path: str) -> float:
         """获取音频时长"""
@@ -147,7 +258,14 @@ class AudioDownloader:
             
             # 先尝试直接 copy 合并，失败则重编码
             cmd = [ffmpeg, '-f', 'concat', '-safe', '0', '-i', list_file, '-c:a', 'libmp3lame', '-b:a', '192k', '-y', out_file]
-            subprocess.run(cmd, capture_output=True)
+            result = subprocess.run(cmd, capture_output=True)
+            if (
+                result.returncode != 0
+                or not os.path.isfile(out_file)
+                or os.path.getsize(out_file) == 0
+            ):
+                stderr = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
+                raise RuntimeError(f"FFmpeg 合并失败: {stderr[-2000:]}")
             return out_file
 
         for p, d in parts:
