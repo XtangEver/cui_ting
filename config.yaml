@@ -14,8 +14,8 @@ llm:
   max_tokens: 128000
 
 settings:
-  input_file: "input_data.json"
-  output_dir: "test_case"
+  input_file: "product_laozeng.json"
+  output_dir: "product_laozeng"
   chunk_size: 20480
   chunk_overlap: 256
   cookies_file: "cookie/bili_cookies.txt"

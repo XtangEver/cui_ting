@@ -7,7 +7,8 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-_MAX_LLM_RETRIES = 5
+_MAX_LLM_RETRIES = 2
+_LLM_TIMEOUT = httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)
 
 
 class LLMProcessor:
@@ -63,19 +64,22 @@ class LLMProcessor:
             if not model_cfg.verify_ssl or custom_headers:
                 http_client = httpx.Client(
                     verify=model_cfg.verify_ssl,
-                    headers=custom_headers
+                    headers=custom_headers,
+                    timeout=_LLM_TIMEOUT,
                 )
                 self._clients[model_name] = self.client_factory(
                     api_key=model_cfg.api_key,
                     base_url=model_cfg.base_url,
                     http_client=http_client,
                     max_retries=_MAX_LLM_RETRIES,
+                    timeout=_LLM_TIMEOUT,
                 )
             else:
                 self._clients[model_name] = self.client_factory(
                     api_key=model_cfg.api_key,
                     base_url=model_cfg.base_url,
                     max_retries=_MAX_LLM_RETRIES,
+                    timeout=_LLM_TIMEOUT,
                 )
         return self._clients[model_name]
 
@@ -88,16 +92,29 @@ class LLMProcessor:
             raise ValueError(f"未配置的模型: {model_name}")
 
         client = self._get_client(model_name)
-        response = client.chat.completions.create(
+        stream = client.chat.completions.create(
             model=model_cfg.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=self.max_tokens
+            max_tokens=self.max_tokens,
+            stream=True,
         )
-        content = response.choices[0].message.content
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content_parts.append(delta.content)
+            rc = getattr(delta, 'reasoning_content', None)
+            if rc:
+                reasoning_parts.append(rc)
+
+        content = ''.join(content_parts)
+        reasoning = ''.join(reasoning_parts)
+        if not content and reasoning:
+            content = reasoning
         content = self._THINK_PATTERN.sub('', content).strip()
 
-        # Best-effort prompt echo detection (log only, don't block)
         first_line = content.split('\n', 1)[0][:100]
         for pattern in self._PROMPT_ECHO_PATTERNS:
             if pattern in first_line:
